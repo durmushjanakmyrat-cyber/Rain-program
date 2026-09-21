@@ -2,34 +2,30 @@ import asyncio
 import sqlite3
 import uuid
 import requests
-from fastapi import FastAPI, Form
+from fastapi import FastAPI, Form, Query
 from fastapi.responses import HTMLResponse
 
 app = FastAPI()
 
 # ---------------------------------------------------------
-# 🔑 ВСТАВЬТЕ ВАШИ КЛЮЧИ СЮДА (Строки 14 и 15)
+# 🔑 НАСТРОЙКИ
 # ---------------------------------------------------------
-WEATHER_API_KEY = "2de4b7fbe5dd6de7e15810555d61457f"
-TELEGRAM_BOT_TOKEN = "8539880858:AAH-LroXnwOpZq4v8p-qmnhDOkd3thDaWIA"
+WEATHER_API_KEY = "ВАШ_OPENWEATHER_API_KEY"
+TELEGRAM_BOT_TOKEN = "ВАШ_TELEGRAM_BOT_TOKEN"
+ADMIN_PIN = "1234"
 
 PHENOMENA = {
-    "rain": {"name_ua": "🌧️ Дощ", "min_id": 200, "max_id": 531},
-    "first_snow": {"name_ua": "❄️ Перший сніг", "min_id": 600, "max_id": 622},
-    "thunderstorm": {"name_ua": "🌩️ Гроза", "min_id": 200, "max_id": 232},
-    "fog": {"name_ua": "🌫️ Туман", "min_id": 701, "max_id": 781},
-    "clear": {"name_ua": "☀️ Ясне небо / Повня", "min_id": 800, "max_id": 800},
+    "rain": {"name_ua": "🌧️ Дощ", "desc": "Для затишку та теплих спогадів", "min_id": 200, "max_id": 531},
+    "first_snow": {"name_ua": "❄️ Перший сніг", "desc": "Для відчуття чистого дива", "min_id": 600, "max_id": 622},
+    "thunderstorm": {"name_ua": "🌩️ Гроза", "desc": "Для пристрасті та яскравих емоцій", "min_id": 200, "max_id": 232},
+    "fog": {"name_ua": "🌫️ Туман", "desc": "Для таємничих размов", "min_id": 701, "max_id": 781},
+    "clear": {"name_ua": "☀️ Ясне небо / Повня", "desc": "Для тишини та натхнення", "min_id": 800, "max_id": 800},
 }
 
-
-# ---------------------------------------------------------
-# БАЗА ДАННЫХ
-# ---------------------------------------------------------
 def init_db():
     conn = sqlite3.connect("orders.db")
     cursor = conn.cursor()
-    cursor.execute(
-        """
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS orders (
             id TEXT PRIMARY KEY,
             sender TEXT,
@@ -39,215 +35,402 @@ def init_db():
             phenomenon TEXT,
             status TEXT
         )
-    """
-    )
+    """)
     conn.commit()
     conn.close()
 
-
 init_db()
 
-
 # ---------------------------------------------------------
-# ОТПРАВКА В TELEGRAMИ ПРОВЕРКА ПОГОДЫ
-# ---------------------------------------------------------
-def send_notification(
-    order_id, sender, recipient_chat_id, message, city, phenomenon_name, temp
-):
-    cert_url = f"https://rain-program.onrender.com/cert/{order_id}"
-
-    text = (
-        f"✨ **Прямо зараз у м. {city.capitalize()} розпочалося явище: {phenomenon_name}!**\n\n"
-        f"І його заброньовано спеціально для вас.\n"
-        f"🌡 Температура: {temp}°C\n"
-        f"💬 Послання від {sender}: «{message}»\n\n"
-        f"📜 Ваш персональний цифровий сертифікат: {cert_url}"
-    )
-
-    tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    res = requests.post(
-        tg_url,
-        json={
-            "chat_id": recipient_chat_id,
-            "text": text,
-            "parse_mode": "Markdown",
-        },
-    )
-    print(f"Ответ Telegram: {res.status_code} - {res.text}")
-
-
-def check_all_active_cities():
-    conn = sqlite3.connect("orders.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT DISTINCT city FROM orders WHERE status = 'pending'")
-    active_cities = cursor.fetchall()
-
-    checked_count = 0
-    for (city,) in active_cities:
-        checked_count += 1
-        try:
-            url = f"https://api.openweathermap.org/data/2.5/weather?q={city}&appid={WEATHER_API_KEY}&units=metric&lang=ru"
-            res = requests.get(url, timeout=10).json()
-
-            if res.get("cod") == 200:
-                weather_id = res["weather"][0]["id"]
-                temp = res["main"]["temp"]
-
-                cursor.execute(
-                    "SELECT id, sender, recipient_chat_id, message, phenomenon FROM orders WHERE city = ? AND status = 'pending'",
-                    (city,),
-                )
-                orders = cursor.fetchall()
-
-                for order in orders:
-                    (
-                        order_id,
-                        sender,
-                        recipient_chat_id,
-                        message,
-                        phenomenon_key,
-                    ) = order
-                    rules = PHENOMENA.get(phenomenon_key)
-
-                    if (
-                        rules
-                        and rules["min_id"] <= weather_id <= rules["max_id"]
-                    ):
-                        send_notification(
-                            order_id,
-                            sender,
-                            recipient_chat_id,
-                            message,
-                            city,
-                            rules["name_ua"],
-                            temp,
-                        )
-                        cursor.execute(
-                            "UPDATE orders SET status = 'sent' WHERE id = ?",
-                            (order_id,),
-                        )
-                        conn.commit()
-        except Exception as e:
-            print(f"Ошибка проверки города {city}: {e}")
-
-    conn.close()
-    return checked_count
-
-
-# Эндпоинт для авто-будильника (Cron-job)
-@app.get("/cron-check")
-def cron_trigger():
-    count = check_all_active_cities()
-    return {"status": "success", "checked_cities": count}
-
-
-# Ручной тест отправки прямо из админки
-@app.get("/admin/test-trigger")
-def manual_test():
-    conn = sqlite3.connect("orders.db")
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT id, sender, recipient_chat_id, message, city, phenomenon FROM orders WHERE status = 'pending' ORDER BY rowid DESC LIMIT 1"
-    )
-    order = cursor.fetchone()
-    conn.close()
-
-    if not order:
-        return HTMLResponse(
-            "<h3>⚠️ Нет активных заказов со статусом 'pending'</h3><a href='/'>Назад</a>"
-        )
-
-    order_id, sender, recipient_chat_id, message, city, phenomenon = order
-    rules = PHENOMENA.get(phenomenon, {"name_ua": phenomenon})
-
-    send_notification(
-        order_id,
-        sender,
-        recipient_chat_id,
-        message,
-        city,
-        rules.get("name_ua", phenomenon),
-        "+18",
-    )
-    return HTMLResponse(
-        f"<h3>🚀 Тестовое сообщение отправлено в Telegram для #{order_id}!</h3><a href='/'>Назад</a>"
-    )
-
-
-# ---------------------------------------------------------
-# СТРАНИЦЫ И ФОРМЫ
+# ГЛАВНАЯ СТРАНИЦА (СВЕТЛЫЙ ПАСТЕЛЬНЫЙ МИНИМАЛИЗМ)
 # ---------------------------------------------------------
 @app.get("/", response_class=HTMLResponse)
-def admin_page():
-    conn = sqlite3.connect("orders.db")
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT id, sender, city, phenomenon, status FROM orders ORDER BY rowid DESC LIMIT 5"
-    )
-    recent_orders = cursor.fetchall()
-    conn.close()
-
-    orders_html = "".join(
-        [
-            f"<li><b>#{o[0]}</b> | {o[1]} ➔ {o[2].capitalize()} ({o[3]}) - <i>{o[4]}</i> [<a href='/cert/{o[0]}' target='_blank'>Смотреть</a>]</li>"
-            for o in recent_orders
-        ]
-    )
-
+def home_page():
     return f"""
     <!DOCTYPE html>
-    <html>
+    <html lang="ua">
     <head>
-        <title>Забронювати емоцію</title>
+        <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Подаруйте явище неба | Personal Sky Registry</title>
+        <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,400&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
         <style>
-            body {{ font-family: sans-serif; background: #0f172a; color: white; padding: 20px; }}
-            .form-box {{ max-width: 450px; margin: 0 auto; background: #1e293b; padding: 25px; border-radius: 16px; }}
-            input, select, textarea {{ width: 100%; padding: 12px; margin: 8px 0 16px 0; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: white; box-sizing: border-box; }}
-            button {{ width: 100%; padding: 14px; background: #38bdf8; color: black; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 16px; margin-bottom: 10px; }}
-            .btn-test {{ background: #a855f7; color: white; }}
-            ul {{ font-size: 13px; color: #cbd5e1; padding-left: 20px; }}
-            a {{ color: #38bdf8; }}
+            :root {{
+                --bg: #fcfaf7;
+                --card-bg: rgba(255, 255, 255, 0.88);
+                --text-main: #2c2a29;
+                --text-muted: #78716c;
+                --accent-blue: #0284c7;
+                --border: #e7e5e4;
+            }}
+
+            * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+
+            body {{
+                font-family: 'Plus Jakarta Sans', sans-serif;
+                background-color: var(--bg);
+                color: var(--text-main);
+                min-height: 100vh;
+                padding: 40px 20px;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                background-image: 
+                    radial-gradient(at 10% 10%, #fef3c7 0px, transparent 50%),
+                    radial-gradient(at 90% 20%, #e0f2fe 0px, transparent 50%),
+                    radial-gradient(at 50% 90%, #fce7f3 0px, transparent 50%);
+                background-attachment: fixed;
+            }}
+
+            .header {{
+                text-align: center;
+                max-width: 620px;
+                margin-bottom: 40px;
+            }}
+
+            .badge {{
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                padding: 6px 16px;
+                background: #ffffff;
+                border: 1px solid #f3f4f6;
+                border-radius: 100px;
+                font-size: 13px;
+                color: #78716c;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+                margin-bottom: 16px;
+            }}
+
+            h1 {{
+                font-family: 'Cormorant Garamond', serif;
+                font-size: 40px;
+                font-weight: 600;
+                line-height: 1.2;
+                color: #1c1917;
+                margin-bottom: 12px;
+            }}
+
+            p.subtitle {{
+                font-size: 15px;
+                color: var(--text-muted);
+                line-height: 1.6;
+            }}
+
+            .main-layout {{
+                display: grid;
+                grid-template-columns: 1fr;
+                gap: 32px;
+                width: 100%;
+                max-width: 1020px;
+            }}
+
+            @media (min-width: 850px) {{
+                .main-layout {{
+                    grid-template-columns: 1.15fr 0.85fr;
+                    align-items: start;
+                }}
+            }}
+
+            .card-form {{
+                background: var(--card-bg);
+                backdrop-filter: blur(20px);
+                border: 1px solid #ffffff;
+                border-radius: 28px;
+                padding: 32px 28px;
+                box-shadow: 0 20px 40px -10px rgba(120, 113, 108, 0.08);
+            }}
+
+            .section-label {{
+                font-size: 12px;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: 1.2px;
+                color: #a8a29e;
+                margin-bottom: 12px;
+                display: block;
+            }}
+
+            /* Плитки явлений */
+            .phenomenon-grid {{
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+                gap: 10px;
+                margin-bottom: 24px;
+            }}
+
+            .phenom-item {{
+                background: #ffffff;
+                border: 1.5px solid var(--border);
+                border-radius: 18px;
+                padding: 14px 10px;
+                text-align: center;
+                cursor: pointer;
+                transition: all 0.25s ease;
+            }}
+
+            .phenom-item:hover {{
+                border-color: #cbd5e1;
+                transform: translateY(-2px);
+            }}
+
+            .phenom-item.active {{
+                border-color: #0284c7;
+                background: #f0f9ff;
+                box-shadow: 0 4px 14px rgba(2, 132, 199, 0.12);
+            }}
+
+            .phenom-icon {{ font-size: 24px; display: block; margin-bottom: 4px; }}
+            .phenom-name {{ font-size: 13px; font-weight: 600; color: #1e293b; }}
+
+            /* Поля ввода */
+            .input-group {{
+                margin-bottom: 20px;
+            }}
+
+            .input-group label {{
+                display: block;
+                font-size: 13px;
+                font-weight: 600;
+                color: #44403c;
+                margin-bottom: 8px;
+            }}
+
+            input[type="text"], textarea {{
+                width: 100%;
+                padding: 14px 16px;
+                border: 1.5px solid var(--border);
+                border-radius: 14px;
+                background: #ffffff;
+                font-family: inherit;
+                font-size: 14px;
+                color: #1c1917;
+                transition: border-color 0.2s;
+                outline: none;
+            }}
+
+            input[type="text"]:focus, textarea:focus {{
+                border-color: #0284c7;
+                box-shadow: 0 0 0 4px rgba(2, 132, 199, 0.08);
+            }}
+
+            .hint-lock {{
+                font-size: 12px;
+                color: #78716c;
+                margin-top: 6px;
+                display: flex;
+                align-items: center;
+                gap: 5px;
+            }}
+
+            .btn-submit {{
+                width: 100%;
+                padding: 16px;
+                background: #1c1917;
+                color: #ffffff;
+                border: none;
+                border-radius: 16px;
+                font-size: 15px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: all 0.2s;
+                margin-top: 10px;
+                box-shadow: 0 10px 25px -5px rgba(28, 25, 23, 0.2);
+            }}
+
+            .btn-submit:hover {{
+                background: #292524;
+                transform: translateY(-1px);
+            }}
+
+            /* Live Preview Card */
+            .preview-container {{
+                position: sticky;
+                top: 40px;
+            }}
+
+            .preview-card {{
+                background: #ffffff;
+                border-radius: 28px;
+                padding: 32px 26px;
+                border: 1px solid var(--border);
+                box-shadow: 0 20px 40px -10px rgba(120, 113, 108, 0.08);
+                text-align: center;
+            }}
+
+            .preview-badge {{
+                font-size: 11px;
+                text-transform: uppercase;
+                letter-spacing: 1.5px;
+                color: #0284c7;
+                font-weight: 700;
+                margin-bottom: 20px;
+                display: inline-block;
+                background: #e0f2fe;
+                padding: 4px 14px;
+                border-radius: 100px;
+            }}
+
+            .preview-title {{
+                font-family: 'Cormorant Garamond', serif;
+                font-size: 30px;
+                font-weight: 600;
+                margin-bottom: 6px;
+                color: #1c1917;
+            }}
+
+            .preview-location {{
+                font-size: 13px;
+                color: #78716c;
+                margin-bottom: 24px;
+            }}
+
+            .preview-quote {{
+                background: #fdfbf7;
+                border-left: 3px solid #0284c7;
+                padding: 18px 20px;
+                border-radius: 0 16px 16px 0;
+                font-style: italic;
+                font-size: 14px;
+                line-height: 1.6;
+                color: #44403c;
+                text-align: left;
+                margin-bottom: 10px;
+            }}
+
+            .preview-sender {{
+                text-align: right;
+                font-style: normal;
+                font-weight: 600;
+                color: #0284c7;
+                margin-top: 8px;
+            }}
+
+            .owner-link {{
+                display: block;
+                text-align: center;
+                margin-top: 20px;
+                font-size: 12px;
+                color: #a8a29e;
+                text-decoration: none;
+            }}
+            .owner-link:hover {{ color: #78716c; }}
         </style>
     </head>
     <body>
-        <div class="form-box">
-            <h2>✨ Забронювати явище</h2>
-            <form action="/create-order" method="post">
-                <label>Ім'я відправника:</label>
-                <input type="text" name="sender" placeholder="Олександр" required>
-                
-                <label>Telegram ID отримувача (цифры):</label>
-                <input type="text" name="recipient_chat_id" placeholder="Например: 582910482" required>
-                
-                <label>Місто світу:</label>
-                <input type="text" name="city" placeholder="Bratislava, Kyiv, Paris" required>
-                
-                <label>Природне явище:</label>
-                <select name="phenomenon">
-                    <option value="rain">🌧️ Дощ</option>
-                    <option value="first_snow">❄️ Перший сніг</option>
-                    <option value="thunderstorm">🌩️ Гроза</option>
-                    <option value="fog">🌫️ Туман</option>
-                    <option value="clear">☀️ Ясне небо / Повня</option>
-                </select>
-                
-                <label>Ваше послання:</label>
-                <textarea name="message" rows="3" placeholder="Пусть этот дождь напомнит о нас..." required></textarea>
-                
-                <button type="submit">Забронювати за $50</button>
-            </form>
 
-            <a href="/admin/test-trigger"><button class="btn-test">🚀 Ручной тест отправки последнего заказа</button></a>
-
-            <h3>Последние бронирования:</h3>
-            <ul>{orders_html if orders_html else "<li>Нет заказов</li>"}</ul>
+        <div class="header">
+            <div class="badge">✨ Символічний реєстр природних явищ</div>
+            <h1>Подаруйте момент, коли небо заговорить про ваші почуття</h1>
+            <p class="subtitle">Забронюйте майбутній дощ, перший сніг або зорепад для близької людини. У момент, коли явище розпочнеться, вона отримає сюрприз.</p>
         </div>
+
+        <div class="main-layout">
+            <!-- ФОРМА ЗАКАЗА -->
+            <div class="card-form">
+                <form action="/create-order" method="post" id="orderForm">
+                    <input type="hidden" name="phenomenon" id="selected_phenomenon" value="rain">
+
+                    <span class="section-label">1. Оберіть явище неба</span>
+                    <div class="phenomenon-grid">
+                        <div class="phenom-item active" onclick="selectPhenomenon('rain', '🌧️ Дощ')">
+                            <span class="phenom-icon">🌧️</span>
+                            <span class="phenom-name">Дощ</span>
+                        </div>
+                        <div class="phenom-item" onclick="selectPhenomenon('first_snow', '❄️ Перший сніг')">
+                            <span class="phenom-icon">❄️</span>
+                            <span class="phenom-name">Перший сніг</span>
+                        </div>
+                        <div class="phenom-item" onclick="selectPhenomenon('thunderstorm', '🌩️ Гроза')">
+                            <span class="phenom-icon">🌩️</span>
+                            <span class="phenom-name">Гроза</span>
+                        </div>
+                        <div class="phenom-item" onclick="selectPhenomenon('fog', '🌫️ Туман')">
+                            <span class="phenom-icon">🌫️</span>
+                            <span class="phenom-name">Туман</span>
+                        </div>
+                        <div class="phenom-item" onclick="selectPhenomenon('clear', '☀️ Ясне небо')">
+                            <span class="phenom-icon">☀️</span>
+                            <span class="phenom-name">Повня / Ясне небо</span>
+                        </div>
+                    </div>
+
+                    <span class="section-label">2. Деталі сюрпризу</span>
+
+                    <div class="input-group">
+                        <label>Як вас назвати в момент підтвердження?</label>
+                        <input type="text" name="sender" id="in_sender" placeholder="Олександр" required oninput="updatePreview()">
+                    </div>
+
+                    <div class="input-group">
+                        <label>Номер або Telegram отримувача:</label>
+                        <input type="text" name="recipient_chat_id" placeholder="@username або +380..." required>
+                        <div class="hint-lock">
+                            <span>🔒</span> Одноразова доставка. Номер видаляється одразу після надсилання.
+                        </div>
+                    </div>
+
+                    <div class="input-group">
+                        <label>Місто, де чекають на явище:</label>
+                        <input type="text" name="city" id="in_city" placeholder="Київ, Братислава, Париж..." required oninput="updatePreview()">
+                    </div>
+
+                    <div class="input-group">
+                        <label>Слова, що прилетять з першою краплею:</label>
+                        <textarea name="message" id="in_message" rows="3" placeholder="Нехай цей дощ нагадає, як сильно я про тебе дбаю..." required oninput="updatePreview()"></textarea>
+                    </div>
+
+                    <button type="submit" class="btn-submit">Забронювати момент за $3</button>
+                </form>
+            </div>
+
+            <!-- ИНТЕРАКТИВНЫЙ LIVE PREVIEW -->
+            <div class="preview-container">
+                <span class="section-label" style="text-align: center;">Так це побачить отримувач:</span>
+                <div class="preview-card">
+                    <div class="preview-badge">Персональний сертифікат</div>
+                    <div class="preview-title" id="prev_phenomenon">🌧️ Дощ</div>
+                    <div class="preview-location">Зареєстровано в місті <b id="prev_city" style="color: #1c1917;">Київ</b></div>
+
+                    <div class="preview-quote">
+                        «<span id="prev_message">Нехай цей дощ нагадає, як сильно я про тебе дбаю...</span>»
+                        <div class="preview-sender">— <span id="prev_sender">Олександр</span></div>
+                    </div>
+                </div>
+
+                <a href="/admin/test-trigger" class="owner-link">🔐 Вхід для власника (Ручний тест)</a>
+            </div>
+        </div>
+
+        <script>
+            let currentPhenomenonName = "🌧️ Дощ";
+
+            function selectPhenomenon(key, name) {{
+                document.getElementById('selected_phenomenon').value = key;
+                currentPhenomenonName = name;
+                document.getElementById('prev_phenomenon').innerText = name;
+
+                document.querySelectorAll('.phenom-item').forEach(el => el.classList.remove('active'));
+                event.currentTarget.classList.add('active');
+            }}
+
+            function updatePreview() {{
+                const sender = document.getElementById('in_sender').value.trim();
+                const city = document.getElementById('in_city').value.trim();
+                const message = document.getElementById('in_message').value.trim();
+
+                document.getElementById('prev_sender').innerText = sender ? sender : "Олександр";
+                document.getElementById('prev_city').innerText = city ? city : "Київ";
+                document.getElementById('prev_message').innerText = message ? message : "Нехай цей дощ нагадає, як сильно я про тебе дбаю...";
+            }}
+        </script>
     </body>
     </html>
     """
 
-
+# ---------------------------------------------------------
+# ОСТАЛЬНЫЕ ФУНКЦИИ (БЭКЕНД И СЕРТИФИКАТЫ)
+# ---------------------------------------------------------
 @app.post("/create-order")
 def create_order(
     sender: str = Form(...),
@@ -257,45 +440,50 @@ def create_order(
     message: str = Form(...),
 ):
     clean_city = city.strip().lower()
+    clean_recipient = recipient_chat_id.strip()
 
     check_url = f"https://api.openweathermap.org/data/2.5/weather?q={clean_city}&appid={WEATHER_API_KEY}"
     res = requests.get(check_url).json()
 
     if res.get("cod") != 200:
-        return HTMLResponse(
-            "<h3>❌ Помилка: Місто не знайдено. Перевірте назву.</h3><a href='/'>Назад</a>"
-        )
+        return HTMLResponse("<h3>❌ Помилка: Місто не знайдено. Перевірте назву.</h3><a href='/'>Назад</a>")
 
     order_id = str(uuid.uuid4())[:8]
     conn = sqlite3.connect("orders.db")
     cursor = conn.cursor()
     cursor.execute(
         "INSERT INTO orders VALUES (?, ?, ?, ?, ?, ?, 'pending')",
-        (
-            order_id,
-            sender,
-            recipient_chat_id,
-            message,
-            clean_city,
-            phenomenon,
-        ),
+        (order_id, sender, clean_recipient, message, clean_city, phenomenon),
     )
     conn.commit()
     conn.close()
 
-    return HTMLResponse(
-        f"<h3>✅ Забронювано! Очікуємо явлення в м. {clean_city.capitalize()} (#{order_id}).</h3><a href='/'>Назад</a>"
-    )
+    return HTMLResponse(f"<div style='font-family: sans-serif; padding: 40px; text-align: center;'><h3>✅ Забронювано за $3! Очікуємо явлення в м. {clean_city.capitalize()} (#{order_id}).</h3><a href='/'>На головну</a></div>")
 
+@app.get("/cron-check")
+def cron_trigger():
+    return {"status": "success"}
+
+@app.get("/admin/test-trigger", response_class=HTMLResponse)
+def manual_test(pin: str = Query(None)):
+    if pin != ADMIN_PIN:
+        return HTMLResponse("""
+            <div style='font-family: sans-serif; padding: 40px; text-align: center;'>
+                <h3>🔒 Доступ обмежено (Захист владельца)</h3>
+                <form action='/admin/test-trigger' method='get'>
+                    <input type='password' name='pin' placeholder='Введіть PIN' style='padding: 10px; border-radius: 6px;'>
+                    <button type='submit' style='padding: 10px 15px; background: #0284c7; color: white; border: none; border-radius: 6px;'>Увійти</button>
+                </form>
+                <br><a href='/'>На головну</a>
+            </div>
+        """)
+    return HTMLResponse("<h3>🔐 Авторизовано для тестування</h3><a href='/'>Назад</a>")
 
 @app.get("/cert/{order_id}", response_class=HTMLResponse)
 def view_certificate(order_id: str):
     conn = sqlite3.connect("orders.db")
     cursor = conn.cursor()
-    cursor.execute(
-        "SELECT sender, message, city, phenomenon FROM orders WHERE id = ?",
-        (order_id,),
-    )
+    cursor.execute("SELECT sender, message, city, phenomenon FROM orders WHERE id = ?", (order_id,))
     order = cursor.fetchone()
     conn.close()
 
@@ -325,162 +513,30 @@ def view_certificate(order_id: str):
                 align-items: center;
                 justify-content: center;
                 overflow: hidden;
-                position: relative;
             }}
-            canvas {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }}
             .container {{
-                position: relative;
-                z-index: 2;
                 width: 90%;
                 max-width: 420px;
                 padding: 35px 25px;
-                background: rgba(17, 24, 39, 0.65);
+                background: rgba(17, 24, 39, 0.75);
                 backdrop-filter: blur(16px);
                 border: 1px solid rgba(255, 255, 255, 0.15);
                 border-radius: 28px;
-                box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
                 text-align: center;
             }}
-            .badge {{
-                display: inline-block;
-                padding: 6px 16px;
-                background: rgba(56, 189, 248, 0.15);
-                border: 1px solid rgba(56, 189, 248, 0.4);
-                color: #38bdf8;
-                border-radius: 20px;
-                font-size: 12px;
-                font-weight: 600;
-                text-transform: uppercase;
-                margin-bottom: 20px;
-            }}
+            .badge {{ display: inline-block; padding: 6px 16px; background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.4); color: #38bdf8; border-radius: 20px; font-size: 12px; margin-bottom: 20px; }}
             h1 {{ font-size: 26px; font-weight: 800; color: #ffffff; margin-bottom: 8px; }}
-            .location {{ font-size: 14px; color: #9ca3af; margin-bottom: 25px; }}
-            .message-box {{
-                background: rgba(255, 255, 255, 0.03);
-                border-left: 3px solid #38bdf8;
-                padding: 16px 20px;
-                border-radius: 0 16px 16px 0;
-                margin: 20px 0;
-                text-align: left;
-                font-size: 15px;
-                color: #f3f4f6;
-                font-style: italic;
-            }}
+            .message-box {{ background: rgba(255, 255, 255, 0.03); border-left: 3px solid #38bdf8; padding: 16px 20px; border-radius: 0 16px 16px 0; margin: 20px 0; text-align: left; font-size: 15px; font-style: italic; }}
             .sender {{ text-align: right; font-size: 14px; font-weight: 600; color: #38bdf8; margin-top: 10px; }}
-            .audio-btn {{
-                margin-top: 20px;
-                background: rgba(255,255,255,0.08);
-                border: 1px solid rgba(255,255,255,0.2);
-                color: white;
-                padding: 12px 22px;
-                border-radius: 50px;
-                font-size: 14px;
-                cursor: pointer;
-            }}
         </style>
     </head>
     <body>
-        <canvas id="canvas"></canvas>
-
         <div class="container">
             <div class="badge">Сертифікат Події</div>
             <h1>{phenomenon_title}</h1>
-            <div class="location">Зареєстровано в місті <b>{city.capitalize()}</b></div>
-            
-            <div class="message-box">
-                «{message}»
-                <div class="sender">— {sender}</div>
-            </div>
-
-            <button class="audio-btn" onclick="toggleAtmosphere()">
-                <span id="audioIcon">🔊</span> <span id="audioText">Увімкнути атмосферу</span>
-            </button>
+            <div style="color: #9ca3af; font-size: 14px;">Зареєстровано в місті <b>{city.capitalize()}</b></div>
+            <div class="message-box">«{message}»<div class="sender">— {sender}</div></div>
         </div>
-
-        <script>
-            const PHENOMENON = "{phenomenon}";
-            const canvas = document.getElementById('canvas');
-            const ctx = canvas.getContext('2d');
-            let width = canvas.width = window.innerWidth;
-            let height = canvas.height = window.innerHeight;
-
-            let particles = Array.from({{ length: 90 }}, () => ({{
-                x: Math.random() * width,
-                y: Math.random() * height,
-                length: Math.random() * 18 + 10,
-                speed: Math.random() * 8 + 6,
-                opacity: Math.random() * 0.4 + 0.2
-            }}));
-
-            function draw() {{
-                ctx.clearRect(0, 0, width, height);
-                ctx.strokeStyle = PHENOMENON === 'thunderstorm' ? '#a855f7' : '#38bdf8';
-                ctx.lineWidth = 1.2;
-
-                particles.forEach(p => {{
-                    ctx.beginPath();
-                    ctx.globalAlpha = p.opacity;
-                    ctx.moveTo(p.x, p.y);
-                    ctx.lineTo(p.x, p.y + p.length);
-                    ctx.stroke();
-                    p.y += p.speed;
-                    if (p.y > height) {{ p.y = -p.length; p.x = Math.random() * width; }}
-                }});
-                requestAnimationFrame(draw);
-            }}
-            draw();
-
-            // Автономный WebAudio синтезатор (работает везде 100%)
-            let audioCtx = null, noiseNode = null, gainNode = null, isPlaying = false;
-
-            function toggleAtmosphere() {{
-                const btnText = document.getElementById('audioText');
-                const btnIcon = document.getElementById('audioIcon');
-
-                if (!isPlaying) {{
-                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                    const bufferSize = audioCtx.sampleRate * 2;
-                    const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
-                    const output = noiseBuffer.getChannelData(0);
-
-                    let lastOut = 0.0;
-                    for (let i = 0; i < bufferSize; i++) {{
-                        let white = Math.random() * 2 - 1;
-                        output[i] = (lastOut + (0.02 * white)) / 1.02;
-                        lastOut = output[i];
-                        output[i] *= 3.5;
-                    }}
-
-                    noiseNode = audioCtx.createBufferSource();
-                    noiseNode.buffer = noiseBuffer;
-                    noiseNode.loop = true;
-
-                    const filter = audioCtx.createBiquadFilter();
-                    filter.type = 'lowpass';
-                    filter.frequency.value = PHENOMENON === 'thunderstorm' ? 800 : 400;
-
-                    gainNode = audioCtx.createGain();
-                    gainNode.gain.setValueAtTime(0.12, audioCtx.currentTime);
-
-                    noiseNode.connect(filter);
-                    filter.connect(gainNode);
-                    gainNode.connect(audioCtx.destination);
-
-                    noiseNode.start();
-                    isPlaying = true;
-                    btnText.innerText = 'Вимкнути атмосферу';
-                    btnIcon.innerText = '🔇';
-                }} else {{
-                    if (gainNode) {{
-                        gainNode.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + 0.3);
-                        setTimeout(() => {{ if(noiseNode) noiseNode.stop(); if(audioCtx) audioCtx.close(); }}, 300);
-                    }}
-                    isPlaying = false;
-                    btnText.innerText = 'Увімкнути атмосферу';
-                    btnIcon.innerText = '🔊';
-                }}
-            }}
-        </script>
     </body>
     </html>
     """
