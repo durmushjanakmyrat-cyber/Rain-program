@@ -491,6 +491,16 @@ def view_certificate(order_id: str):
     rules = PHENOMENA.get(phenomenon, {})
     phenomenon_title = rules.get("name_ua", phenomenon)
 
+    # Прямые надежные MP3-дорожки для каждого явления
+    SOUND_MAP = {
+        "rain": "https://cdn.freesound.org/previews/530/530415_1648170-lq.mp3",
+        "first_snow": "https://cdn.freesound.org/previews/459/459992_9202319-lq.mp3",
+        "thunderstorm": "https://cdn.freesound.org/previews/416/416839_5121236-lq.mp3",
+        "fog": "https://cdn.freesound.org/previews/563/563819_11861866-lq.mp3",
+        "clear": "https://cdn.freesound.org/previews/518/518864_11283620-lq.mp3",
+    }
+    sound_url = SOUND_MAP.get(phenomenon, SOUND_MAP["rain"])
+
     return f"""
     <!DOCTYPE html>
     <html lang="ua">
@@ -611,6 +621,11 @@ def view_certificate(order_id: str):
     <body>
         <canvas id="canvas"></canvas>
 
+        <!-- Встроенный предзагруженный аудиоэлемент -->
+        <audio id="bgAudio" loop preload="auto">
+            <source src="{sound_url}" type="audio/mpeg">
+        </audio>
+
         <div class="container">
             <div class="badge">Сертифікат Події</div>
             <h1>{phenomenon_title}</h1>
@@ -676,7 +691,7 @@ def view_certificate(order_id: str):
                     pulse: Math.random() * 0.02 + 0.005,
                     opacity: Math.random() * 0.8 + 0.2
                 }}));
-            }} else {{ // Rain (default)
+            }} else {{ // Rain
                 particles = Array.from({{ length: 90 }}, () => ({{
                     x: Math.random() * width,
                     y: Math.random() * height,
@@ -759,85 +774,24 @@ def view_certificate(order_id: str):
             }}
             draw();
 
-            // Гарантированные прямые аудиопотоки с Internet Archive
-            const SOUNDS = {{
-                'rain': 'https://ia800208.us.archive.org/4/items/RainSoundEffect/Rain_Sound_Effect.mp3',
-                'first_snow': 'https://ia800902.us.archive.org/28/items/WindSoundEffect/Wind_Sound_Effect.mp3',
-                'thunderstorm': 'https://ia800301.us.archive.org/10/items/RainSounds10Hours/RainSounds10Hours.mp3',
-                'fog': 'https://ia800201.us.archive.org/11/items/NatureSounds10Hours/ForestSounds.mp3',
-                'clear': 'https://ia800201.us.archive.org/11/items/NatureSounds10Hours/NightCrickets.mp3'
-            }};
-
-            let audio = null;
-            let audioCtx = null;
-            let isPlaying = false;
-
+            // Надежный запуск через один клик по DOM-элементу
             function toggleAudio() {{
-                if (!isPlaying) {{
-                    const soundUrl = SOUNDS[PHENOMENON] || SOUNDS['rain'];
-                    audio = new Audio();
-                    audio.src = soundUrl;
-                    audio.loop = true;
-                    audio.volume = 0.5;
+                const audio = document.getElementById('bgAudio');
+                const btnText = document.getElementById('audioText');
+                const btnIcon = document.getElementById('audioIcon');
 
-                    let playPromise = audio.play();
-                    if (playPromise !== undefined) {{
-                        playPromise.then(() => {{
-                            isPlaying = true;
-                            document.getElementById('audioText').innerText = 'Вимкнути атмосферу';
-                            document.getElementById('audioIcon').innerText = '🔇';
-                        }}).catch(err => {{
-                            console.log("MP3 stream blocked, switching to soft WebAudio synth:", err);
-                            startFallbackSynth();
-                        }});
-                    }}
+                if (audio.paused) {{
+                    audio.play().then(() => {{
+                        btnText.innerText = 'Вимкнути атмосферу';
+                        btnIcon.innerText = '🔇';
+                    }}).catch(err => {{
+                        console.error("Audio playback error:", err);
+                    }});
                 }} else {{
-                    stopAllAudio();
-                }}
-            }}
-
-            function stopAllAudio() {{
-                if (audio) {{
                     audio.pause();
-                    audio = null;
+                    btnText.innerText = 'Увімкнути атмосферу';
+                    btnIcon.innerText = '🔊';
                 }}
-                if (audioCtx) {{
-                    audioCtx.close();
-                    audioCtx = null;
-                }}
-                isPlaying = false;
-                document.getElementById('audioText').innerText = 'Увімкнути атмосферу';
-                document.getElementById('audioIcon').innerText = '🔊';
-            }}
-
-            // Автоматический локальный синтезатор, если внешний MP3 заблокирован сетью
-            function startFallbackSynth() {{
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                const bufferSize = audioCtx.sampleRate * 2;
-                const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
-                const output = noiseBuffer.getChannelData(0);
-                for (let i = 0; i < bufferSize; i++) {{
-                    output[i] = Math.random() * 2 - 1;
-                }}
-                const noise = audioCtx.createBufferSource();
-                noise.buffer = noiseBuffer;
-                noise.loop = true;
-
-                const filter = audioCtx.createBiquadFilter();
-                filter.type = 'lowpass';
-                filter.frequency.value = 600;
-
-                const gain = audioCtx.createGain();
-                gain.gain.value = 0.08;
-
-                noise.connect(filter);
-                filter.connect(gain);
-                gain.connect(audioCtx.destination);
-
-                noise.start();
-                isPlaying = true;
-                document.getElementById('audioText').innerText = 'Вимкнути атмосферу';
-                document.getElementById('audioIcon').innerText = '🔇';
             }}
         </script>
     </body>
