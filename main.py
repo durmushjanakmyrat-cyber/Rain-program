@@ -10,9 +10,9 @@ app = FastAPI()
 # ---------------------------------------------------------
 # 🔑 НАСТРОЙКИ
 # ---------------------------------------------------------
-WEATHER_API_KEY = "ВАШ_OPENWEATHER_API_KEY"
-TELEGRAM_BOT_TOKEN = "ВАШ_TELEGRAM_BOT_TOKEN"
-ADMIN_PIN = "1234"
+WEATHER_API_KEY = "2de4b7fbe5dd6de7e15810555d61457f"
+TELEGRAM_BOT_TOKEN = "8539880858:AAH-LroXnwOpZq4v8p-qmnhDOkd3thDaWIA"
+ADMIN_PIN = "122595"
 
 PHENOMENA = {
     "rain": {"name_ua": "🌧️ Дощ", "desc": "Для затишку та теплих спогадів", "min_id": 200, "max_id": 531},
