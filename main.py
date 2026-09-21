@@ -490,24 +490,227 @@ def view_certificate(order_id: str):
 
     return f"""
     <!DOCTYPE html>
-    <html>
+    <html lang="ua">
     <head>
-        <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>{phenomenon_title}</title>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>{phenomenon_title} | Personal Registry</title>
+        <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600;800&display=swap" rel="stylesheet">
         <style>
-            body {{ margin: 0; background: #0b131f; color: #fff; font-family: sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; text-align: center; }}
-            .card {{ background: rgba(255,255,255,0.05); backdrop-filter: blur(10px); padding: 30px; border-radius: 20px; max-width: 85%; border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 8px 32px rgba(0,0,0,0.5); }}
-            h1 {{ color: #7dd3fc; font-size: 22px; }}
-            .msg {{ font-style: italic; margin: 20px 0; color: #e2e8f0; border-left: 3px solid #38bdf8; padding-left: 12px; text-align: left; line-height: 1.5; }}
+            * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+            body {{
+                font-family: 'Plus Jakarta Sans', sans-serif;
+                background: #030712;
+                color: #f3f4f6;
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                overflow: hidden;
+                position: relative;
+            }}
+            canvas {{
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                z-index: 1;
+            }}
+            .container {{
+                position: relative;
+                z-index: 2;
+                width: 90%;
+                max-width: 420px;
+                padding: 35px 25px;
+                background: rgba(17, 24, 39, 0.6);
+                backdrop-filter: blur(16px);
+                -webkit-backdrop-filter: blur(16px);
+                border: 1px solid rgba(255, 255, 255, 0.15);
+                border-radius: 28px;
+                box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6), inset 0 0 20px rgba(56, 189, 248, 0.1);
+                text-align: center;
+                animation: fadeIn 1.2s ease-out;
+            }}
+            @keyframes fadeIn {{
+                from {{ opacity: 0; transform: translateY(20px) scale(0.95); }}
+                to {{ opacity: 1; transform: translateY(0) scale(1); }}
+            }}
+            .badge {{
+                display: inline-block;
+                padding: 6px 16px;
+                background: rgba(56, 189, 248, 0.15);
+                border: 1px solid rgba(56, 189, 248, 0.4);
+                color: #38bdf8;
+                border-radius: 20px;
+                font-size: 12px;
+                font-weight: 600;
+                letter-spacing: 1px;
+                text-transform: uppercase;
+                margin-bottom: 20px;
+            }}
+            h1 {{
+                font-size: 26px;
+                font-weight: 800;
+                color: #ffffff;
+                margin-bottom: 8px;
+                text-shadow: 0 0 15px rgba(56, 189, 248, 0.3);
+            }}
+            .location {{
+                font-size: 14px;
+                color: #9ca3af;
+                margin-bottom: 25px;
+            }}
+            .location b {{ color: #e5e7eb; }}
+            .message-box {{
+                background: rgba(255, 255, 255, 0.03);
+                border-left: 3px solid #38bdf8;
+                padding: 16px 20px;
+                border-radius: 0 16px 16px 0;
+                margin: 20px 0;
+                text-align: left;
+                font-size: 15px;
+                line-height: 1.6;
+                color: #f3f4f6;
+                font-style: italic;
+            }}
+            .sender {{
+                text-align: right;
+                font-size: 14px;
+                font-weight: 600;
+                color: #38bdf8;
+                margin-top: 10px;
+            }}
+            .cert-id {{
+                margin-top: 30px;
+                font-size: 11px;
+                color: #6b7280;
+                letter-spacing: 2px;
+                text-transform: uppercase;
+            }}
+            .audio-btn {{
+                margin-top: 20px;
+                background: rgba(255,255,255,0.08);
+                border: 1px solid rgba(255,255,255,0.2);
+                color: white;
+                padding: 10px 18px;
+                border-radius: 50px;
+                font-size: 13px;
+                cursor: pointer;
+                transition: all 0.3s;
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+            }}
+            .audio-btn:hover {{ background: rgba(56, 189, 248, 0.2); border-color: #38bdf8; }}
         </style>
     </head>
     <body>
-        <div class="card">
+        <canvas id="canvas"></canvas>
+
+        <div class="container">
+            <div class="badge">Сертифікат Події</div>
             <h1>{phenomenon_title}</h1>
-            <p style="color: #94a3b8;">Зареєстровано у місті <b>{city.capitalize()}</b> спеціально для вас.</p>
-            <div class="msg">«{message}»</div>
-            <p style="text-align: right; color: #7dd3fc;">— {sender}</p>
+            <div class="location">Зареєстровано в місті <b>{city.capitalize()}</b></div>
+            
+            <div class="message-box">
+                «{message}»
+                <div class="sender">— {sender}</div>
+            </div>
+
+            <button class="audio-btn" onclick="toggleAudio()">
+                <span id="audioIcon">🔊</span> <span id="audioText">Увімкнути атмосферу</span>
+            </button>
+
+            <div class="cert-id">Офіційний реєстр #{order_id}</div>
         </div>
+
+        <script>
+            // Анимация дождя на Canvas
+            const canvas = document.getElementById('canvas');
+            const ctx = canvas.getContext('2d');
+            let width = canvas.width = window.innerWidth;
+            let height = canvas.height = window.innerHeight;
+
+            window.addEventListener('resize', () => {{
+                width = canvas.width = window.innerWidth;
+                height = canvas.height = window.innerHeight;
+            }});
+
+            const drops = Array.from({{ length: 120 }}, () => ({{
+                x: Math.random() * width,
+                y: Math.random() * height,
+                length: Math.random() * 20 + 10,
+                speed: Math.random() * 10 + 10,
+                opacity: Math.random() * 0.4 + 0.1
+            }}));
+
+            function draw() {{
+                ctx.clearRect(0, 0, width, height);
+                ctx.strokeStyle = '#38bdf8';
+                ctx.lineWidth = 1;
+                
+                drops.forEach(d => {{
+                    ctx.beginPath();
+                    ctx.globalAlpha = d.opacity;
+                    ctx.moveTo(d.x, d.y);
+                    ctx.lineTo(d.x, d.y + d.length);
+                    ctx.stroke();
+
+                    d.y += d.speed;
+                    if (d.y > height) {{
+                        d.y = -d.length;
+                        d.x = Math.random() * width;
+                    }}
+                }});
+                requestAnimationFrame(draw);
+            }}
+            draw();
+
+            // Web Audio API: Генератор звука дождя без внешних файлов
+            let audioCtx, noiseNode, gainNode, isPlaying = false;
+
+            function toggleAudio() {{
+                if (!isPlaying) {{
+                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                    const bufferSize = audioCtx.sampleRate * 2;
+                    const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+                    const output = noiseBuffer.getChannelData(0);
+
+                    for (let i = 0; i < bufferSize; i++) {{
+                        output[i] = Math.random() * 2 - 1;
+                    }}
+
+                    noiseNode = audioCtx.createBufferSource();
+                    noiseNode.buffer = noiseBuffer;
+                    noiseNode.loop = true;
+
+                    const filter = audioCtx.createBiquadFilter();
+                    filter.type = 'lowpass';
+                    filter.frequency.value = 1000;
+
+                    gainNode = audioCtx.createGain();
+                    gainNode.gain.setValueAtTime(0.15, audioCtx.currentTime);
+
+                    noiseNode.connect(filter);
+                    filter.connect(gainNode);
+                    gainNode.connect(audioCtx.destination);
+
+                    noiseNode.start();
+                    isPlaying = true;
+                    document.getElementById('audioText').innerText = 'Вимкнути атмосферу';
+                    document.getElementById('audioIcon').innerText = '🔇';
+                }} else {{
+                    gainNode.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + 0.5);
+                    setTimeout(() => {{ noiseNode.stop(); audioCtx.close(); }}, 500);
+                    isPlaying = false;
+                    document.getElementById('audioText').innerText = 'Увімкнути атмосферу';
+                    document.getElementById('audioIcon').innerText = '🔊';
+                }}
+            }}
+        </script>
     </body>
     </html>
     """
+
+   
