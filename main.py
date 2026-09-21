@@ -290,7 +290,7 @@ def create_order(
     conn.commit()
     conn.close()
 
-    tg_gift_link = f"https://t.me/YourRainBot?start={order_id}"
+    tg_gift_link = f"https://t.me/WheaterRainAppBot?start={order_id}"
 
     if lang == "en":
         return HTMLResponse(
