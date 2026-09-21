@@ -523,7 +523,7 @@ def view_certificate(order_id: str):
                 width: 90%;
                 max-width: 420px;
                 padding: 35px 25px;
-                background: rgba(17, 24, 39, 0.6);
+                background: rgba(17, 24, 39, 0.65);
                 backdrop-filter: blur(16px);
                 -webkit-backdrop-filter: blur(16px);
                 border: 1px solid rgba(255, 255, 255, 0.15);
@@ -626,7 +626,7 @@ def view_certificate(order_id: str):
         </div>
 
         <script>
-            // Анимация дождя на Canvas
+            const PHENOMENON = "{phenomenon}";
             const canvas = document.getElementById('canvas');
             const ctx = canvas.getContext('2d');
             let width = canvas.width = window.innerWidth;
@@ -637,37 +637,126 @@ def view_certificate(order_id: str):
                 height = canvas.height = window.innerHeight;
             }});
 
-            const drops = Array.from({{ length: 120 }}, () => ({{
-                x: Math.random() * width,
-                y: Math.random() * height,
-                length: Math.random() * 20 + 10,
-                speed: Math.random() * 10 + 10,
-                opacity: Math.random() * 0.4 + 0.1
-            }}));
+            let particles = [];
+            let flashOpacity = 0;
+
+            if (PHENOMENON === 'first_snow') {{
+                particles = Array.from({{ length: 80 }}, () => ({{
+                    x: Math.random() * width,
+                    y: Math.random() * height,
+                    r: Math.random() * 2.5 + 1,
+                    speedY: Math.random() * 0.8 + 0.3,
+                    speedX: Math.random() * 0.6 - 0.3,
+                    opacity: Math.random() * 0.7 + 0.3
+                }}));
+            }} else if (PHENOMENON === 'thunderstorm') {{
+                particles = Array.from({{ length: 140 }}, () => ({{
+                    x: Math.random() * width,
+                    y: Math.random() * height,
+                    length: Math.random() * 25 + 15,
+                    speed: Math.random() * 12 + 12,
+                    opacity: Math.random() * 0.5 + 0.2
+                }}));
+            }} else if (PHENOMENON === 'fog') {{
+                particles = Array.from({{ length: 25 }}, () => ({{
+                    x: Math.random() * width,
+                    y: Math.random() * height,
+                    r: Math.random() * 100 + 80,
+                    speedX: Math.random() * 0.3 - 0.15,
+                    opacity: Math.random() * 0.12 + 0.03
+                }}));
+            }} else if (PHENOMENON === 'clear') {{
+                particles = Array.from({{ length: 60 }}, () => ({{
+                    x: Math.random() * width,
+                    y: Math.random() * height,
+                    r: Math.random() * 1.8 + 0.5,
+                    pulse: Math.random() * 0.02 + 0.005,
+                    opacity: Math.random() * 0.8 + 0.2
+                }}));
+            }} else {{ // Rain (default)
+                particles = Array.from({{ length: 90 }}, () => ({{
+                    x: Math.random() * width,
+                    y: Math.random() * height,
+                    length: Math.random() * 15 + 8,
+                    speed: Math.random() * 6 + 5,
+                    opacity: Math.random() * 0.35 + 0.1
+                }}));
+            }}
 
             function draw() {{
                 ctx.clearRect(0, 0, width, height);
-                ctx.strokeStyle = '#38bdf8';
-                ctx.lineWidth = 1;
-                
-                drops.forEach(d => {{
-                    ctx.beginPath();
-                    ctx.globalAlpha = d.opacity;
-                    ctx.moveTo(d.x, d.y);
-                    ctx.lineTo(d.x, d.y + d.length);
-                    ctx.stroke();
 
-                    d.y += d.speed;
-                    if (d.y > height) {{
-                        d.y = -d.length;
-                        d.x = Math.random() * width;
+                if (PHENOMENON === 'first_snow') {{
+                    ctx.fillStyle = '#ffffff';
+                    particles.forEach(p => {{
+                        ctx.beginPath();
+                        ctx.globalAlpha = p.opacity;
+                        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+                        ctx.fill();
+                        p.y += p.speedY;
+                        p.x += p.speedX;
+                        if (p.y > height) {{ p.y = -5; p.x = Math.random() * width; }}
+                    }});
+                }} else if (PHENOMENON === 'thunderstorm') {{
+                    ctx.strokeStyle = '#a855f7';
+                    ctx.lineWidth = 1.2;
+                    particles.forEach(p => {{
+                        ctx.beginPath();
+                        ctx.globalAlpha = p.opacity;
+                        ctx.moveTo(p.x, p.y);
+                        ctx.lineTo(p.x - 2, p.y + p.length);
+                        ctx.stroke();
+                        p.y += p.speed;
+                        if (p.y > height) {{ p.y = -p.length; p.x = Math.random() * width; }}
+                    }});
+
+                    if (Math.random() < 0.008) flashOpacity = 0.35;
+                    if (flashOpacity > 0) {{
+                        ctx.fillStyle = `rgba(255, 255, 255, ${{flashOpacity}})`;
+                        ctx.fillRect(0, 0, width, height);
+                        flashOpacity -= 0.02;
                     }}
-                }});
+                }} else if (PHENOMENON === 'fog') {{
+                    particles.forEach(p => {{
+                        ctx.beginPath();
+                        ctx.globalAlpha = p.opacity;
+                        let grad = ctx.createRadialGradient(p.x, p.y, 10, p.x, p.y, p.r);
+                        grad.addColorStop(0, '#94a3b8');
+                        grad.addColorStop(1, 'transparent');
+                        ctx.fillStyle = grad;
+                        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+                        ctx.fill();
+                        p.x += p.speedX;
+                        if (p.x > width + p.r) p.x = -p.r;
+                    }});
+                }} else if (PHENOMENON === 'clear') {{
+                    ctx.fillStyle = '#fef08a';
+                    particles.forEach(p => {{
+                        ctx.beginPath();
+                        p.opacity += p.pulse;
+                        if (p.opacity > 0.9 || p.opacity < 0.1) p.pulse = -p.pulse;
+                        ctx.globalAlpha = Math.max(0, Math.min(1, p.opacity));
+                        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+                        ctx.fill();
+                    }});
+                }} else {{ // Rain
+                    ctx.strokeStyle = '#38bdf8';
+                    ctx.lineWidth = 1;
+                    particles.forEach(p => {{
+                        ctx.beginPath();
+                        ctx.globalAlpha = p.opacity;
+                        ctx.moveTo(p.x, p.y);
+                        ctx.lineTo(p.x, p.y + p.length);
+                        ctx.stroke();
+                        p.y += p.speed;
+                        if (p.y > height) {{ p.y = -p.length; p.x = Math.random() * width; }}
+                    }});
+                }}
                 requestAnimationFrame(draw);
             }}
             draw();
 
-            // Web Audio API: Генератор звука дождя без внешних файлов
+            // Web Audio API: Мягкий коричневый шум (Brownian Noise) для тихих капель
             let audioCtx, noiseNode, gainNode, isPlaying = false;
 
             function toggleAudio() {{
@@ -677,8 +766,12 @@ def view_certificate(order_id: str):
                     const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
                     const output = noiseBuffer.getChannelData(0);
 
+                    let lastOut = 0.0;
                     for (let i = 0; i < bufferSize; i++) {{
-                        output[i] = Math.random() * 2 - 1;
+                        let white = Math.random() * 2 - 1;
+                        output[i] = (lastOut + (0.02 * white)) / 1.02;
+                        lastOut = output[i];
+                        output[i] *= 2.5;
                     }}
 
                     noiseNode = audioCtx.createBufferSource();
@@ -687,10 +780,10 @@ def view_certificate(order_id: str):
 
                     const filter = audioCtx.createBiquadFilter();
                     filter.type = 'lowpass';
-                    filter.frequency.value = 1000;
+                    filter.frequency.value = 450;
 
                     gainNode = audioCtx.createGain();
-                    gainNode.gain.setValueAtTime(0.15, audioCtx.currentTime);
+                    gainNode.gain.setValueAtTime(0.04, audioCtx.currentTime);
 
                     noiseNode.connect(filter);
                     filter.connect(gainNode);
@@ -712,5 +805,3 @@ def view_certificate(order_id: str):
     </body>
     </html>
     """
-
-   
