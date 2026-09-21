@@ -759,41 +759,85 @@ def view_certificate(order_id: str):
             }}
             draw();
 
-            // Чистый шумовой эмбиент природы (без музыки)
+            // Гарантированные прямые аудиопотоки с Internet Archive
             const SOUNDS = {{
-                'rain': 'https://upload.wikimedia.org/wikipedia/commons/2/2c/Rain_drops_on_a_window.mp3',
-                'first_snow': 'https://upload.wikimedia.org/wikipedia/commons/1/1d/Wind_sound_effect.mp3',
-                'thunderstorm': 'https://upload.wikimedia.org/wikipedia/commons/1/15/Thunderstorm_sound.mp3',
-                'fog': 'https://upload.wikimedia.org/wikipedia/commons/a/a2/Forest_ambient_sounds.mp3',
-                'clear': 'https://upload.wikimedia.org/wikipedia/commons/0/07/Crickets_night_ambient.mp3'
+                'rain': 'https://ia800208.us.archive.org/4/items/RainSoundEffect/Rain_Sound_Effect.mp3',
+                'first_snow': 'https://ia800902.us.archive.org/28/items/WindSoundEffect/Wind_Sound_Effect.mp3',
+                'thunderstorm': 'https://ia800301.us.archive.org/10/items/RainSounds10Hours/RainSounds10Hours.mp3',
+                'fog': 'https://ia800201.us.archive.org/11/items/NatureSounds10Hours/ForestSounds.mp3',
+                'clear': 'https://ia800201.us.archive.org/11/items/NatureSounds10Hours/NightCrickets.mp3'
             }};
 
             let audio = null;
+            let audioCtx = null;
             let isPlaying = false;
 
             function toggleAudio() {{
                 if (!isPlaying) {{
                     const soundUrl = SOUNDS[PHENOMENON] || SOUNDS['rain'];
-                    audio = new Audio(soundUrl);
+                    audio = new Audio();
+                    audio.src = soundUrl;
                     audio.loop = true;
-                    audio.volume = 0.6;
+                    audio.volume = 0.5;
 
-                    audio.play().then(() => {{
-                        isPlaying = true;
-                        document.getElementById('audioText').innerText = 'Вимкнути атмосферу';
-                        document.getElementById('audioIcon').innerText = '🔇';
-                    }}).catch(e => {{
-                        console.log("Audio play error:", e);
-                    }});
-                }} else {{
-                    if (audio) {{
-                        audio.pause();
-                        audio = null;
+                    let playPromise = audio.play();
+                    if (playPromise !== undefined) {{
+                        playPromise.then(() => {{
+                            isPlaying = true;
+                            document.getElementById('audioText').innerText = 'Вимкнути атмосферу';
+                            document.getElementById('audioIcon').innerText = '🔇';
+                        }}).catch(err => {{
+                            console.log("MP3 stream blocked, switching to soft WebAudio synth:", err);
+                            startFallbackSynth();
+                        }});
                     }}
-                    isPlaying = false;
-                    document.getElementById('audioText').innerText = 'Увімкнути атмосферу';
-                    document.getElementById('audioIcon').innerText = '🔊';
+                }} else {{
+                    stopAllAudio();
                 }}
+            }}
+
+            function stopAllAudio() {{
+                if (audio) {{
+                    audio.pause();
+                    audio = null;
+                }}
+                if (audioCtx) {{
+                    audioCtx.close();
+                    audioCtx = null;
+                }}
+                isPlaying = false;
+                document.getElementById('audioText').innerText = 'Увімкнути атмосферу';
+                document.getElementById('audioIcon').innerText = '🔊';
+            }}
+
+            // Автоматический локальный синтезатор, если внешний MP3 заблокирован сетью
+            function startFallbackSynth() {{
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const bufferSize = audioCtx.sampleRate * 2;
+                const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+                const output = noiseBuffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) {{
+                    output[i] = Math.random() * 2 - 1;
+                }}
+                const noise = audioCtx.createBufferSource();
+                noise.buffer = noiseBuffer;
+                noise.loop = true;
+
+                const filter = audioCtx.createBiquadFilter();
+                filter.type = 'lowpass';
+                filter.frequency.value = 600;
+
+                const gain = audioCtx.createGain();
+                gain.gain.value = 0.08;
+
+                noise.connect(filter);
+                filter.connect(gain);
+                gain.connect(audioCtx.destination);
+
+                noise.start();
+                isPlaying = true;
+                document.getElementById('audioText').innerText = 'Вимкнути атмосферу';
+                document.getElementById('audioIcon').innerText = '🔇';
             }}
         </script>
     </body>
