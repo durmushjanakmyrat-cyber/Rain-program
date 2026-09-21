@@ -2,29 +2,29 @@ import asyncio
 import sqlite3
 import uuid
 import requests
-from fastapi import FastAPI, Form, Request
+from fastapi import FastAPI, Form
 from fastapi.responses import HTMLResponse
 
 app = FastAPI()
 
 # ---------------------------------------------------------
-# НАСТРОЙКИ (Укажите свои реальные данные)
+# 🔑 ВСТАВЬТЕ ВАШИ КЛЮЧИ СЮДА (Строки 14 и 15)
 # ---------------------------------------------------------
 WEATHER_API_KEY = "2de4b7fbe5dd6de7e15810555d61457f"
 TELEGRAM_BOT_TOKEN = "8539880858:AAH-LroXnwOpZq4v8p-qmnhDOkd3thDaWIA"
-BOT_USERNAME = "WheaterRainAppBot"
-ADMIN_PIN = "122595"
-RENDER_URL = "https://rain-program.onrender.com"
 
 PHENOMENA = {
-    "rain": {"name_ua": "🌧️ Дощ", "name_en": "🌧️ Rain", "min_id": 200, "max_id": 531},
-    "first_snow": {"name_ua": "❄️ Перший Сніг (Аукціон)", "name_en": "❄️ First Snow (Auction)", "min_id": 600, "max_id": 622},
-    "thunderstorm": {"name_ua": "🌩️ Гроза", "name_en": "🌩️ Thunderstorm", "min_id": 200, "max_id": 232},
-    "fog": {"name_ua": "🌫️ Туман", "name_en": "🌫️ Fog", "min_id": 701, "max_id": 781},
-    "clear": {"name_ua": "☀️ Ясне небо / Повня", "name_en": "☀️ Clear Sky / Full Moon", "min_id": 800, "max_id": 800},
+    "rain": {"name_ua": "🌧️ Дощ", "min_id": 200, "max_id": 531},
+    "first_snow": {"name_ua": "❄️ Перший сніг", "min_id": 600, "max_id": 622},
+    "thunderstorm": {"name_ua": "🌩️ Гроза", "min_id": 200, "max_id": 232},
+    "fog": {"name_ua": "🌫️ Туман", "min_id": 701, "max_id": 781},
+    "clear": {"name_ua": "☀️ Ясне небо / Повня", "min_id": 800, "max_id": 800},
 }
 
 
+# ---------------------------------------------------------
+# БАЗА ДАННЫХ
+# ---------------------------------------------------------
 def init_db():
     conn = sqlite3.connect("orders.db")
     cursor = conn.cursor()
@@ -37,9 +37,6 @@ def init_db():
             message TEXT,
             city TEXT,
             phenomenon TEXT,
-            price REAL,
-            is_auction INTEGER,
-            lang TEXT,
             status TEXT
         )
     """
@@ -52,267 +49,200 @@ init_db()
 
 
 # ---------------------------------------------------------
-# TELEGRAM WEBHOOK (Прием сообщений /start)
+# ОТПРАВКА В TELEGRAMИ ПРОВЕРКА ПОГОДЫ
 # ---------------------------------------------------------
-@app.post("/webhook")
-async def telegram_webhook(request: Request):
-    try:
-        data = await request.json()
-        if "message" in data:
-            chat_id = str(data["message"]["chat"]["id"])
-            text = data["message"].get("text", "")
+def send_notification(
+    order_id, sender, recipient_chat_id, message, city, phenomenon_name, temp
+):
+    cert_url = f"https://rain-program.onrender.com/cert/{order_id}"
 
-            if text.startswith("/start"):
-                parts = text.split()
-                if len(parts) > 1:
-                    order_id = parts[1].strip()
-
-                    conn = sqlite3.connect("orders.db")
-                    cursor = conn.cursor()
-                    cursor.execute("UPDATE orders SET recipient_chat_id = ? WHERE id = ?", (chat_id, order_id))
-                    cursor.execute("SELECT sender, city, phenomenon, lang FROM orders WHERE id = ?", (order_id,))
-                    order = cursor.fetchone()
-                    conn.commit()
-                    conn.close()
-
-                    if order:
-                        sender, city, phenomenon_key, lang = order
-                        rules = PHENOMENA.get(phenomenon_key, {})
-                        phen_name = rules.get("name_en" if lang == "en" else "name_ua", phenomenon_key)
-
-                        reply_text = (
-                            f"✨ **Gift Activated!**\n\n"
-                            f"{sender} booked **{phen_name}** in **{city.capitalize()}** for you.\n"
-                            f"We will notify you instantly when it starts!"
-                            if lang == "en"
-                            else f"✨ **Подарунок активовано!**\n\n"
-                            f"{sender} забронював(ла) для вас **{phen_name}** у м. **{city.capitalize()}**.\n"
-                            f"Ми сповістимо вас миттєво, як тільки явище розпочнеться!"
-                        )
-
-                        requests.post(
-                            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-                            json={"chat_id": chat_id, "text": reply_text, "parse_mode": "Markdown"},
-                        )
-                else:
-                    requests.post(
-                        f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-                        json={"chat_id": chat_id, "text": "Вітаємо! Сервіс емоцій та погодних подарунків вітає вас."},
-                    )
-    except Exception as e:
-        print(f"Webhook error: {e}")
-
-    return {"status": "ok"}
-
-
-def send_notification(order_id, sender, recipient_chat_id, message, city, phenomenon_name, temp, lang="ua"):
-    cert_url = f"{RENDER_URL}/cert/{order_id}"
-
-    if lang == "en":
-        text = (
-            f"✨ **Right now in {city.capitalize()} weather event started: {phenomenon_name}!**\n\n"
-            f"And it was exclusively booked for you.\n"
-            f"🌡 Temperature: {temp}°C\n"
-            f"💬 Message from {sender}: «{message}»\n\n"
-            f"📜 Your personal digital certificate: {cert_url}"
-        )
-    else:
-        text = (
-            f"✨ **Прямо зараз у м. {city.capitalize()} почалося явище: {phenomenon_name}!**\n\n"
-            f"І його ексклюзивно заброньовано для вас.\n"
-            f"🌡 Температура: {temp}°C\n"
-            f"💬 Послання від {sender}: «{message}»\n\n"
-            f"📜 Ваш персональний цифровий сертифікат: {cert_url}"
-        )
+    text = (
+        f"✨ **Прямо зараз у м. {city.capitalize()} розпочалося явище: {phenomenon_name}!**\n\n"
+        f"І його заброньовано спеціально для вас.\n"
+        f"🌡 Температура: {temp}°C\n"
+        f"💬 Послання від {sender}: «{message}»\n\n"
+        f"📜 Ваш персональний цифровий сертифікат: {cert_url}"
+    )
 
     tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    requests.post(tg_url, json={"chat_id": recipient_chat_id, "text": text, "parse_mode": "Markdown"})
+    res = requests.post(
+        tg_url,
+        json={
+            "chat_id": recipient_chat_id,
+            "text": text,
+            "parse_mode": "Markdown",
+        },
+    )
+    print(f"Ответ Telegram: {res.status_code} - {res.text}")
 
 
 def check_all_active_cities():
     conn = sqlite3.connect("orders.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT DISTINCT city FROM orders WHERE status = 'pending' AND recipient_chat_id != ''")
+    cursor.execute("SELECT DISTINCT city FROM orders WHERE status = 'pending'")
     active_cities = cursor.fetchall()
 
+    checked_count = 0
     for (city,) in active_cities:
+        checked_count += 1
         try:
-            url = f"https://api.openweathermap.org/data/2.5/weather?q={city}&appid={WEATHER_API_KEY}&units=metric"
-            res = requests.get(url).json()
+            url = f"https://api.openweathermap.org/data/2.5/weather?q={city}&appid={WEATHER_API_KEY}&units=metric&lang=ru"
+            res = requests.get(url, timeout=10).json()
 
             if res.get("cod") == 200:
                 weather_id = res["weather"][0]["id"]
                 temp = res["main"]["temp"]
 
                 cursor.execute(
-                    "SELECT id, sender, recipient_chat_id, message, phenomenon, price, is_auction, lang FROM orders WHERE city = ? AND status = 'pending' ORDER BY price DESC",
+                    "SELECT id, sender, recipient_chat_id, message, phenomenon FROM orders WHERE city = ? AND status = 'pending'",
                     (city,),
                 )
                 orders = cursor.fetchall()
-                processed_auctions = set()
 
                 for order in orders:
-                    (order_id, sender, recipient_chat_id, message, phenomenon_key, price, is_auction, lang) = order
+                    (
+                        order_id,
+                        sender,
+                        recipient_chat_id,
+                        message,
+                        phenomenon_key,
+                    ) = order
                     rules = PHENOMENA.get(phenomenon_key)
 
-                    if is_auction and phenomenon_key in processed_auctions:
-                        continue
-
-                    if rules and rules["min_id"] <= weather_id <= rules["max_id"]:
-                        phen_name = rules["name_en"] if lang == "en" else rules["name_ua"]
-                        send_notification(order_id, sender, recipient_chat_id, message, city, phen_name, temp, lang)
-                        cursor.execute("UPDATE orders SET status = 'sent' WHERE id = ?", (order_id,))
+                    if (
+                        rules
+                        and rules["min_id"] <= weather_id <= rules["max_id"]
+                    ):
+                        send_notification(
+                            order_id,
+                            sender,
+                            recipient_chat_id,
+                            message,
+                            city,
+                            rules["name_ua"],
+                            temp,
+                        )
+                        cursor.execute(
+                            "UPDATE orders SET status = 'sent' WHERE id = ?",
+                            (order_id,),
+                        )
                         conn.commit()
-
-                        if is_auction:
-                            processed_auctions.add(phenomenon_key)
         except Exception as e:
-            print(f"Error checking {city}: {e}")
+            print(f"Ошибка проверки города {city}: {e}")
 
     conn.close()
+    return checked_count
 
 
-async def background_weather_checker():
-    while True:
-        check_all_active_cities()
-        await asyncio.sleep(600)
+# Эндпоинт для авто-будильника (Cron-job)
+@app.get("/cron-check")
+def cron_trigger():
+    count = check_all_active_cities()
+    return {"status": "success", "checked_cities": count}
 
 
-@app.on_event("startup")
-async def startup_event():
-    # Регистрация вебхука в Telegram при запуске
-    try:
-        webhook_url = f"{RENDER_URL}/webhook"
-        requests.get(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setWebhook?url={webhook_url}")
-    except Exception as e:
-        print(f"Failed to set webhook: {e}")
+# Ручной тест отправки прямо из админки
+@app.get("/admin/test-trigger")
+def manual_test():
+    conn = sqlite3.connect("orders.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, sender, recipient_chat_id, message, city, phenomenon FROM orders WHERE status = 'pending' ORDER BY rowid DESC LIMIT 1"
+    )
+    order = cursor.fetchone()
+    conn.close()
 
-    asyncio.create_task(background_weather_checker())
+    if not order:
+        return HTMLResponse(
+            "<h3>⚠️ Нет активных заказов со статусом 'pending'</h3><a href='/'>Назад</a>"
+        )
+
+    order_id, sender, recipient_chat_id, message, city, phenomenon = order
+    rules = PHENOMENA.get(phenomenon, {"name_ua": phenomenon})
+
+    send_notification(
+        order_id,
+        sender,
+        recipient_chat_id,
+        message,
+        city,
+        rules.get("name_ua", phenomenon),
+        "+18",
+    )
+    return HTMLResponse(
+        f"<h3>🚀 Тестовое сообщение отправлено в Telegram для #{order_id}!</h3><a href='/'>Назад</a>"
+    )
 
 
 # ---------------------------------------------------------
-# ГЛАВНАЯ СТРАНИЦА
+# СТРАНИЦЫ И ФОРМЫ
 # ---------------------------------------------------------
 @app.get("/", response_class=HTMLResponse)
-def home_page():
-    return """
+def admin_page():
+    conn = sqlite3.connect("orders.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, sender, city, phenomenon, status FROM orders ORDER BY rowid DESC LIMIT 5"
+    )
+    recent_orders = cursor.fetchall()
+    conn.close()
+
+    orders_html = "".join(
+        [
+            f"<li><b>#{o[0]}</b> | {o[1]} ➔ {o[2].capitalize()} ({o[3]}) - <i>{o[4]}</i> [<a href='/cert/{o[0]}' target='_blank'>Смотреть</a>]</li>"
+            for o in recent_orders
+        ]
+    )
+
+    return f"""
     <!DOCTYPE html>
-    <html lang="ua">
+    <html>
     <head>
-        <meta charset="UTF-8">
-        <title>Забронювати Емоцію / Book Weather Moment</title>
+        <title>Забронювати емоцію</title>
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
-            body { font-family: -apple-system, sans-serif; background: #0f172a; color: white; padding: 15px; margin: 0; }
-            .card { max-width: 480px; margin: 20px auto; background: #1e293b; padding: 25px; border-radius: 20px; border: 1px solid #334155; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
-            .lang-switch { display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 15px; }
-            .lang-btn { background: #334155; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-weight: bold; }
-            .lang-btn.active { background: #38bdf8; color: black; }
-            h2 { color: #7dd3fc; margin-top: 0; font-size: 22px; }
-            label { font-size: 13px; color: #94a3b8; display: block; margin-top: 12px; }
-            input, select, textarea { width: 100%; padding: 12px; margin-top: 5px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: white; box-sizing: border-box; font-size: 15px; }
-            .price-tag { background: rgba(56, 189, 248, 0.1); border: 1px solid #38bdf8; padding: 12px; border-radius: 8px; margin: 15px 0; text-align: center; color: #38bdf8; font-weight: bold; }
-            button.submit-btn { width: 100%; padding: 15px; background: #38bdf8; color: black; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; font-size: 16px; margin-top: 15px; }
+            body {{ font-family: sans-serif; background: #0f172a; color: white; padding: 20px; }}
+            .form-box {{ max-width: 450px; margin: 0 auto; background: #1e293b; padding: 25px; border-radius: 16px; }}
+            input, select, textarea {{ width: 100%; padding: 12px; margin: 8px 0 16px 0; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: white; box-sizing: border-box; }}
+            button {{ width: 100%; padding: 14px; background: #38bdf8; color: black; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 16px; margin-bottom: 10px; }}
+            .btn-test {{ background: #a855f7; color: white; }}
+            ul {{ font-size: 13px; color: #cbd5e1; padding-left: 20px; }}
+            a {{ color: #38bdf8; }}
         </style>
     </head>
     <body>
-        <div class="card">
-            <div class="lang-switch">
-                <button class="lang-btn active" onclick="setLang('ua')">UA 🇺🇦</button>
-                <button class="lang-btn" onclick="setLang('en')">EN 🇬🇧</button>
-            </div>
-
-            <h2 id="t-title">✨ Забронювати природне явище</h2>
+        <div class="form-box">
+            <h2>✨ Забронювати явище</h2>
             <form action="/create-order" method="post">
-                <input type="hidden" name="lang" id="langInput" value="ua">
-
-                <label id="t-sender">Ваше ім'я (відправник):</label>
+                <label>Ім'я відправника:</label>
                 <input type="text" name="sender" placeholder="Олександр" required>
                 
-                <label id="t-city">Місто світу:</label>
-                <input type="text" name="city" placeholder="Kyiv, Paris, London, Tokyo" required>
+                <label>Telegram ID отримувача (цифры):</label>
+                <input type="text" name="recipient_chat_id" placeholder="Например: 582910482" required>
                 
-                <label id="t-phenomenon">Природне явище:</label>
-                <select name="phenomenon" id="phenomenonSelect" onchange="toggleAuction()">
-                    <option value="rain" id="opt-rain">🌧️ Дощ ($5 / 250 грн)</option>
-                    <option value="thunderstorm" id="opt-thunder">🌩️ Гроза ($5 / 250 грн)</option>
-                    <option value="fog" id="opt-fog">🌫️ Туман ($5 / 250 грн)</option>
-                    <option value="clear" id="opt-clear">☀️ Ясне небо / Повня ($5 / 250 грн)</option>
-                    <option value="first_snow" id="opt-snow">❄️ Перший Сніг Сезону (АУКЦІОН)</option>
+                <label>Місто світу:</label>
+                <input type="text" name="city" placeholder="Bratislava, Kyiv, Paris" required>
+                
+                <label>Природне явище:</label>
+                <select name="phenomenon">
+                    <option value="rain">🌧️ Дощ</option>
+                    <option value="first_snow">❄️ Перший сніг</option>
+                    <option value="thunderstorm">🌩️ Гроза</option>
+                    <option value="fog">🌫️ Туман</option>
+                    <option value="clear">☀️ Ясне небо / Повня</option>
                 </select>
                 
-                <div id="priceBox" class="price-tag">Вартість бронювання: $5 (250 грн)</div>
-
-                <div id="auctionBox" style="display:none;">
-                    <label id="t-bid">Ваша ставка для аукціону ($ / грн):</label>
-                    <input type="number" name="bid_price" value="10" min="5">
-                    <p style="font-size: 12px; color: #f59e0b; margin-top: 4px;" id="t-auc-desc">⚠️ Правом на «Перший сніг» заволодіє той, чия ставка буде вищою на момент снігопаду.</p>
-                </div>
-
-                <label id="t-msg">Ваше тепле послання:</label>
-                <textarea name="message" rows="3" placeholder="Нехай цей момент нагадає тобі про нас..." required></textarea>
+                <label>Ваше послання:</label>
+                <textarea name="message" rows="3" placeholder="Пусть этот дождь напомнит о нас..." required></textarea>
                 
-                <button type="submit" class="submit-btn" id="t-btn">Оформити подарунок ($5 / 250 грн)</button>
+                <button type="submit">Забронювати за $50</button>
             </form>
+
+            <a href="/admin/test-trigger"><button class="btn-test">🚀 Ручной тест отправки последнего заказа</button></a>
+
+            <h3>Последние бронирования:</h3>
+            <ul>{orders_html if orders_html else "<li>Нет заказов</li>"}</ul>
         </div>
-
-        <script>
-            let currentLang = 'ua';
-
-            function setLang(lang) {
-                currentLang = lang;
-                document.getElementById('langInput').value = lang;
-                document.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('active'));
-                event.target.classList.add('active');
-
-                if (lang === 'en') {
-                    document.getElementById('t-title').innerText = "✨ Book a Weather Moment";
-                    document.getElementById('t-sender').innerText = "Your name (sender):";
-                    document.getElementById('t-city').innerText = "City of the world:";
-                    document.getElementById('t-phenomenon').innerText = "Weather Phenomenon:";
-                    document.getElementById('t-bid').innerText = "Your Auction Bid ($):";
-                    document.getElementById('t-auc-desc').innerText = "⚠️ 'First Snow' will be delivered to the highest bidder when snowfall begins.";
-                    document.getElementById('t-msg').innerText = "Your personal message:";
-                    document.getElementById('t-btn').innerText = "Proceed to Gift Creation ($5)";
-                    document.getElementById('priceBox').innerText = "Booking Price: $5 (250 UAH)";
-                    
-                    document.getElementById('opt-rain').innerText = "🌧️ Rain ($5)";
-                    document.getElementById('opt-thunder').innerText = "🌩️ Thunderstorm ($5)";
-                    document.getElementById('opt-fog').innerText = "🌫️ Fog ($5)";
-                    document.getElementById('opt-clear').innerText = "☀️ Clear Sky / Full Moon ($5)";
-                    document.getElementById('opt-snow').innerText = "❄️ First Snow (AUCTION)";
-                } else {
-                    document.getElementById('t-title').innerText = "✨ Забронювати природне явище";
-                    document.getElementById('t-sender').innerText = "Ваше ім'я (відправник):";
-                    document.getElementById('t-city').innerText = "Місто світу:";
-                    document.getElementById('t-phenomenon').innerText = "Природне явище:";
-                    document.getElementById('t-bid').innerText = "Ваша ставка для аукціону ($ / грн):";
-                    document.getElementById('t-auc-desc').innerText = "⚠️ Правом на «Перший сніг» заволодіє той, чия ставка буде вищою на момент снігопаду.";
-                    document.getElementById('t-msg').innerText = "Ваше тепле послання:";
-                    document.getElementById('t-btn').innerText = "Оформити подарунок ($5 / 250 грн)";
-                    document.getElementById('priceBox').innerText = "Вартість бронювання: $5 (250 грн)";
-
-                    document.getElementById('opt-rain').innerText = "🌧️ Дощ ($5 / 250 грн)";
-                    document.getElementById('opt-thunder').innerText = "🌩️ Гроза ($5 / 250 грн)";
-                    document.getElementById('opt-fog').innerText = "🌫️ Туман ($5 / 250 грн)";
-                    document.getElementById('opt-clear').innerText = "☀️ Ясне небо / Повня ($5 / 250 грн)";
-                    document.getElementById('opt-snow').innerText = "❄️ Перший Сніг Сезону (АУКЦІОН)";
-                }
-            }
-
-            function toggleAuction() {
-                var select = document.getElementById("phenomenonSelect");
-                var priceBox = document.getElementById("priceBox");
-                var auctionBox = document.getElementById("auctionBox");
-                if (select.value === "first_snow") {
-                    priceBox.style.display = "none";
-                    auctionBox.style.display = "block";
-                } else {
-                    priceBox.style.display = "block";
-                    auctionBox.style.display = "none";
-                }
-            }
-        </script>
     </body>
     </html>
     """
@@ -321,11 +251,10 @@ def home_page():
 @app.post("/create-order")
 def create_order(
     sender: str = Form(...),
+    recipient_chat_id: str = Form(...),
     city: str = Form(...),
     phenomenon: str = Form(...),
     message: str = Form(...),
-    lang: str = Form("ua"),
-    bid_price: float = Form(5.0),
 ):
     clean_city = city.strip().lower()
 
@@ -333,144 +262,30 @@ def create_order(
     res = requests.get(check_url).json()
 
     if res.get("cod") != 200:
-        msg = "❌ City not found." if lang == "en" else "❌ Місто не знайдено."
-        return HTMLResponse(f"<h3>{msg}</h3><a href='/'>Back / Назад</a>")
+        return HTMLResponse(
+            "<h3>❌ Помилка: Місто не знайдено. Перевірте назву.</h3><a href='/'>Назад</a>"
+        )
 
-    if res.get("sys", {}).get("country") == "RU":
-        msg = "⛔ Region not supported." if lang == "en" else "⛔ Даний регіон недоступний."
-        return HTMLResponse(f"<h3>{msg}</h3><a href='/'>Back / Назад</a>")
-
-    is_auction = 1 if phenomenon == "first_snow" else 0
-    final_price = bid_price if is_auction else 5.0
     order_id = str(uuid.uuid4())[:8]
-
     conn = sqlite3.connect("orders.db")
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT INTO orders VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, 'pending')",
-        (order_id, sender, message, clean_city, phenomenon, final_price, is_auction, lang),
+        "INSERT INTO orders VALUES (?, ?, ?, ?, ?, ?, 'pending')",
+        (
+            order_id,
+            sender,
+            recipient_chat_id,
+            message,
+            clean_city,
+            phenomenon,
+        ),
     )
     conn.commit()
     conn.close()
 
-    tg_gift_link = f"https://t.me/{BOT_USERNAME}?start={order_id}"
-
-    if lang == "en":
-        return HTMLResponse(
-            f"""
-            <body style="background:#0f172a;color:white;font-family:sans-serif;padding:20px;text-align:center;">
-                <div style="max-width:450px;margin:auto;background:#1e293b;padding:25px;border-radius:16px;">
-                    <h2>✅ Booking Created!</h2>
-                    <p>Send this gift link to the recipient so they get notified when the weather starts:</p>
-                    <input type="text" value="{tg_gift_link}" style="width:100%;padding:10px;border-radius:6px;background:#0f172a;color:#38bdf8;border:1px solid #38bdf8;" readonly>
-                    <br><br>
-                    <a href="https://t.me/share/url?url={tg_gift_link}&text=I%20booked%20the%20next%20weather%20moment%20for%20you!" style="display:block;background:#38bdf8;color:black;padding:12px;border-radius:8px;text-decoration:none;font-weight:bold;">Send via Telegram</a>
-                </div>
-            </body>
-            """
-        )
-    else:
-        return HTMLResponse(
-            f"""
-            <body style="background:#0f172a;color:white;font-family:sans-serif;padding:20px;text-align:center;">
-                <div style="max-width:450px;margin:auto;background:#1e293b;padding:25px;border-radius:16px;">
-                    <h2>✅ Бронювання створено!</h2>
-                    <p>Надішліть це посилання-подарунок одержувачу, щоб бот сповістив його у момент події:</p>
-                    <input type="text" value="{tg_gift_link}" style="width:100%;padding:10px;border-radius:6px;background:#0f172a;color:#38bdf8;border:1px solid #38bdf8;" readonly>
-                    <br><br>
-                    <a href="https://t.me/share/url?url={tg_gift_link}&text=Я%20забронював%20для%20тебе%20найближчу%20погоду!" style="display:block;background:#38bdf8;color:black;padding:12px;border-radius:8px;text-decoration:none;font-weight:bold;">Надіслати в Telegram</a>
-                </div>
-            </body>
-            """
-        )
-
-
-# ---------------------------------------------------------
-# ПАНЕЛЬ ВЛАДЕЛЬЦА
-# ---------------------------------------------------------
-@app.get("/admin", response_class=HTMLResponse)
-def admin_panel(pin: str = ""):
-    if pin != ADMIN_PIN:
-        return """
-        <body style="background:#0f172a;color:white;font-family:sans-serif;padding:30px;">
-            <form method="get" style="max-width:300px;margin:auto;">
-                <h3>🔒 Панель власника</h3>
-                <input type="password" name="pin" placeholder="ПИН-код" style="width:100%;padding:10px;margin-bottom:10px;">
-                <button style="width:100%;padding:10px;background:#38bdf8;">Увійти</button>
-            </form>
-        </body>
-        """
-
-    conn = sqlite3.connect("orders.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, sender, recipient_chat_id, city, phenomenon, price, is_auction, status FROM orders")
-    orders = cursor.fetchall()
-    conn.close()
-
-    rows = ""
-    for o in orders:
-        o_id, sender, tg_id, city, phenom, price, is_auc, status = o
-        rows += f"""
-        <tr style="border-bottom:1px solid #334155;">
-            <td style="padding:8px;">#{o_id}</td>
-            <td style="padding:8px;">{sender}</td>
-            <td style="padding:8px;">{tg_id if tg_id else "⏳ Очікує кліку"}</td>
-            <td style="padding:8px;">{city.capitalize()}</td>
-            <td style="padding:8px;">{phenom}</td>
-            <td style="padding:8px;">${price}</td>
-            <td style="padding:8px;">{status}</td>
-            <td style="padding:8px;">
-                <form action="/admin/test-trigger" method="post" style="margin:0;">
-                    <input type="hidden" name="pin" value="{ADMIN_PIN}">
-                    <input type="hidden" name="order_id" value="{o_id}">
-                    <button style="background:#22c55e;color:black;border:none;padding:6px 12px;border-radius:4px;font-weight:bold;cursor:pointer;">🚀 Тест</button>
-                </form>
-            </td>
-        </tr>
-        """
-
-    return f"""
-    <!DOCTYPE html>
-    <html>
-    <head><title>Admin Panel</title><meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>body {{ font-family: sans-serif; background: #0f172a; color: white; padding: 15px; }} table {{ width: 100%; border-collapse: collapse; background: #1e293b; }} th {{ background: #334155; text-align: left; padding: 10px; }}</style>
-    </head>
-    <body>
-        <h2>👑 Панель управління</h2>
-        <div style="overflow-x:auto;">
-            <table>
-                <tr><th>ID</th><th>Відправник</th><th>Telegram Chat ID</th><th>Місто</th><th>Явище</th><th>Ціна</th><th>Статус</th><th>Дій</th></tr>
-                {rows}
-            </table>
-        </div>
-    </body>
-    </html>
-    """
-
-
-@app.post("/admin/test-trigger")
-def test_trigger(pin: str = Form(...), order_id: str = Form(...)):
-    if pin != ADMIN_PIN:
-        return "Error"
-
-    conn = sqlite3.connect("orders.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT sender, recipient_chat_id, message, city, phenomenon, lang FROM orders WHERE id = ?", (order_id,))
-    order = cursor.fetchone()
-    conn.close()
-
-    if order:
-        sender, recipient_chat_id, message, city, phenomenon_key, lang = order
-        if not recipient_chat_id:
-            return HTMLResponse("<h3>⚠️ Одержувач ще не перейшов за посиланням-подарунком!</h3><a href='/admin?pin=122595'>Назад</a>")
-
-        rules = PHENOMENA.get(phenomenon_key, {"name_ua": "🌩️ Тест", "name_en": "🌩️ Test"})
-        phen_name = rules["name_en"] if lang == "en" else rules["name_ua"]
-
-        send_notification(order_id, sender, recipient_chat_id, message, city, f"{phen_name} (TEST)", 18.5, lang)
-        return HTMLResponse(f"<h3>✅ Надіслано для #{order_id}!</h3><a href='/admin?pin={ADMIN_PIN}'>Назад</a>")
-
-    return "Not found"
+    return HTMLResponse(
+        f"<h3>✅ Забронювано! Очікуємо явлення в м. {clean_city.capitalize()} (#{order_id}).</h3><a href='/'>Назад</a>"
+    )
 
 
 @app.get("/cert/{order_id}", response_class=HTMLResponse)
@@ -490,16 +305,6 @@ def view_certificate(order_id: str):
     sender, message, city, phenomenon = order
     rules = PHENOMENA.get(phenomenon, {})
     phenomenon_title = rules.get("name_ua", phenomenon)
-
-    # Прямые надежные MP3-дорожки для каждого явления
-    SOUND_MAP = {
-        "rain": "https://cdn.freesound.org/previews/530/530415_1648170-lq.mp3",
-        "first_snow": "https://cdn.freesound.org/previews/459/459992_9202319-lq.mp3",
-        "thunderstorm": "https://cdn.freesound.org/previews/416/416839_5121236-lq.mp3",
-        "fog": "https://cdn.freesound.org/previews/563/563819_11861866-lq.mp3",
-        "clear": "https://cdn.freesound.org/previews/518/518864_11283620-lq.mp3",
-    }
-    sound_url = SOUND_MAP.get(phenomenon, SOUND_MAP["rain"])
 
     return f"""
     <!DOCTYPE html>
@@ -522,14 +327,7 @@ def view_certificate(order_id: str):
                 overflow: hidden;
                 position: relative;
             }}
-            canvas {{
-                position: absolute;
-                top: 0;
-                left: 0;
-                width: 100%;
-                height: 100%;
-                z-index: 1;
-            }}
+            canvas {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }}
             .container {{
                 position: relative;
                 z-index: 2;
@@ -538,16 +336,10 @@ def view_certificate(order_id: str):
                 padding: 35px 25px;
                 background: rgba(17, 24, 39, 0.65);
                 backdrop-filter: blur(16px);
-                -webkit-backdrop-filter: blur(16px);
                 border: 1px solid rgba(255, 255, 255, 0.15);
                 border-radius: 28px;
-                box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6), inset 0 0 20px rgba(56, 189, 248, 0.1);
+                box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
                 text-align: center;
-                animation: fadeIn 1.2s ease-out;
-            }}
-            @keyframes fadeIn {{
-                from {{ opacity: 0; transform: translateY(20px) scale(0.95); }}
-                to {{ opacity: 1; transform: translateY(0) scale(1); }}
             }}
             .badge {{
                 display: inline-block;
@@ -558,23 +350,11 @@ def view_certificate(order_id: str):
                 border-radius: 20px;
                 font-size: 12px;
                 font-weight: 600;
-                letter-spacing: 1px;
                 text-transform: uppercase;
                 margin-bottom: 20px;
             }}
-            h1 {{
-                font-size: 26px;
-                font-weight: 800;
-                color: #ffffff;
-                margin-bottom: 8px;
-                text-shadow: 0 0 15px rgba(56, 189, 248, 0.3);
-            }}
-            .location {{
-                font-size: 14px;
-                color: #9ca3af;
-                margin-bottom: 25px;
-            }}
-            .location b {{ color: #e5e7eb; }}
+            h1 {{ font-size: 26px; font-weight: 800; color: #ffffff; margin-bottom: 8px; }}
+            .location {{ font-size: 14px; color: #9ca3af; margin-bottom: 25px; }}
             .message-box {{
                 background: rgba(255, 255, 255, 0.03);
                 border-left: 3px solid #38bdf8;
@@ -583,48 +363,24 @@ def view_certificate(order_id: str):
                 margin: 20px 0;
                 text-align: left;
                 font-size: 15px;
-                line-height: 1.6;
                 color: #f3f4f6;
                 font-style: italic;
             }}
-            .sender {{
-                text-align: right;
-                font-size: 14px;
-                font-weight: 600;
-                color: #38bdf8;
-                margin-top: 10px;
-            }}
-            .cert-id {{
-                margin-top: 30px;
-                font-size: 11px;
-                color: #6b7280;
-                letter-spacing: 2px;
-                text-transform: uppercase;
-            }}
+            .sender {{ text-align: right; font-size: 14px; font-weight: 600; color: #38bdf8; margin-top: 10px; }}
             .audio-btn {{
                 margin-top: 20px;
                 background: rgba(255,255,255,0.08);
                 border: 1px solid rgba(255,255,255,0.2);
                 color: white;
-                padding: 10px 18px;
+                padding: 12px 22px;
                 border-radius: 50px;
-                font-size: 13px;
+                font-size: 14px;
                 cursor: pointer;
-                transition: all 0.3s;
-                display: inline-flex;
-                align-items: center;
-                gap: 8px;
             }}
-            .audio-btn:hover {{ background: rgba(56, 189, 248, 0.2); border-color: #38bdf8; }}
         </style>
     </head>
     <body>
         <canvas id="canvas"></canvas>
-
-        <!-- Встроенный предзагруженный аудиоэлемент -->
-        <audio id="bgAudio" loop preload="auto">
-            <source src="{sound_url}" type="audio/mpeg">
-        </audio>
 
         <div class="container">
             <div class="badge">Сертифікат Події</div>
@@ -636,11 +392,9 @@ def view_certificate(order_id: str):
                 <div class="sender">— {sender}</div>
             </div>
 
-            <button class="audio-btn" onclick="toggleAudio()">
+            <button class="audio-btn" onclick="toggleAtmosphere()">
                 <span id="audioIcon">🔊</span> <span id="audioText">Увімкнути атмосферу</span>
             </button>
-
-            <div class="cert-id">Офіційний реєстр #{order_id}</div>
         </div>
 
         <script>
@@ -650,145 +404,78 @@ def view_certificate(order_id: str):
             let width = canvas.width = window.innerWidth;
             let height = canvas.height = window.innerHeight;
 
-            window.addEventListener('resize', () => {{
-                width = canvas.width = window.innerWidth;
-                height = canvas.height = window.innerHeight;
-            }});
-
-            let particles = [];
-            let flashOpacity = 0;
-
-            if (PHENOMENON === 'first_snow') {{
-                particles = Array.from({{ length: 80 }}, () => ({{
-                    x: Math.random() * width,
-                    y: Math.random() * height,
-                    r: Math.random() * 2.5 + 1,
-                    speedY: Math.random() * 0.8 + 0.3,
-                    speedX: Math.random() * 0.6 - 0.3,
-                    opacity: Math.random() * 0.7 + 0.3
-                }}));
-            }} else if (PHENOMENON === 'thunderstorm') {{
-                particles = Array.from({{ length: 140 }}, () => ({{
-                    x: Math.random() * width,
-                    y: Math.random() * height,
-                    length: Math.random() * 25 + 15,
-                    speed: Math.random() * 12 + 12,
-                    opacity: Math.random() * 0.5 + 0.2
-                }}));
-            }} else if (PHENOMENON === 'fog') {{
-                particles = Array.from({{ length: 25 }}, () => ({{
-                    x: Math.random() * width,
-                    y: Math.random() * height,
-                    r: Math.random() * 100 + 80,
-                    speedX: Math.random() * 0.3 - 0.15,
-                    opacity: Math.random() * 0.12 + 0.03
-                }}));
-            }} else if (PHENOMENON === 'clear') {{
-                particles = Array.from({{ length: 60 }}, () => ({{
-                    x: Math.random() * width,
-                    y: Math.random() * height,
-                    r: Math.random() * 1.8 + 0.5,
-                    pulse: Math.random() * 0.02 + 0.005,
-                    opacity: Math.random() * 0.8 + 0.2
-                }}));
-            }} else {{ // Rain
-                particles = Array.from({{ length: 90 }}, () => ({{
-                    x: Math.random() * width,
-                    y: Math.random() * height,
-                    length: Math.random() * 15 + 8,
-                    speed: Math.random() * 6 + 5,
-                    opacity: Math.random() * 0.35 + 0.1
-                }}));
-            }}
+            let particles = Array.from({{ length: 90 }}, () => ({{
+                x: Math.random() * width,
+                y: Math.random() * height,
+                length: Math.random() * 18 + 10,
+                speed: Math.random() * 8 + 6,
+                opacity: Math.random() * 0.4 + 0.2
+            }}));
 
             function draw() {{
                 ctx.clearRect(0, 0, width, height);
+                ctx.strokeStyle = PHENOMENON === 'thunderstorm' ? '#a855f7' : '#38bdf8';
+                ctx.lineWidth = 1.2;
 
-                if (PHENOMENON === 'first_snow') {{
-                    ctx.fillStyle = '#ffffff';
-                    particles.forEach(p => {{
-                        ctx.beginPath();
-                        ctx.globalAlpha = p.opacity;
-                        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-                        ctx.fill();
-                        p.y += p.speedY;
-                        p.x += p.speedX;
-                        if (p.y > height) {{ p.y = -5; p.x = Math.random() * width; }}
-                    }});
-                }} else if (PHENOMENON === 'thunderstorm') {{
-                    ctx.strokeStyle = '#a855f7';
-                    ctx.lineWidth = 1.2;
-                    particles.forEach(p => {{
-                        ctx.beginPath();
-                        ctx.globalAlpha = p.opacity;
-                        ctx.moveTo(p.x, p.y);
-                        ctx.lineTo(p.x - 2, p.y + p.length);
-                        ctx.stroke();
-                        p.y += p.speed;
-                        if (p.y > height) {{ p.y = -p.length; p.x = Math.random() * width; }}
-                    }});
-
-                    if (Math.random() < 0.008) flashOpacity = 0.35;
-                    if (flashOpacity > 0) {{
-                        ctx.fillStyle = `rgba(255, 255, 255, ${{flashOpacity}})`;
-                        ctx.fillRect(0, 0, width, height);
-                        flashOpacity -= 0.02;
-                    }}
-                }} else if (PHENOMENON === 'fog') {{
-                    particles.forEach(p => {{
-                        ctx.beginPath();
-                        ctx.globalAlpha = p.opacity;
-                        let grad = ctx.createRadialGradient(p.x, p.y, 10, p.x, p.y, p.r);
-                        grad.addColorStop(0, '#94a3b8');
-                        grad.addColorStop(1, 'transparent');
-                        ctx.fillStyle = grad;
-                        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-                        ctx.fill();
-                        p.x += p.speedX;
-                        if (p.x > width + p.r) p.x = -p.r;
-                    }});
-                }} else if (PHENOMENON === 'clear') {{
-                    ctx.fillStyle = '#fef08a';
-                    particles.forEach(p => {{
-                        ctx.beginPath();
-                        p.opacity += p.pulse;
-                        if (p.opacity > 0.9 || p.opacity < 0.1) p.pulse = -p.pulse;
-                        ctx.globalAlpha = Math.max(0, Math.min(1, p.opacity));
-                        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-                        ctx.fill();
-                    }});
-                }} else {{ // Rain
-                    ctx.strokeStyle = '#38bdf8';
-                    ctx.lineWidth = 1;
-                    particles.forEach(p => {{
-                        ctx.beginPath();
-                        ctx.globalAlpha = p.opacity;
-                        ctx.moveTo(p.x, p.y);
-                        ctx.lineTo(p.x, p.y + p.length);
-                        ctx.stroke();
-                        p.y += p.speed;
-                        if (p.y > height) {{ p.y = -p.length; p.x = Math.random() * width; }}
-                    }});
-                }}
+                particles.forEach(p => {{
+                    ctx.beginPath();
+                    ctx.globalAlpha = p.opacity;
+                    ctx.moveTo(p.x, p.y);
+                    ctx.lineTo(p.x, p.y + p.length);
+                    ctx.stroke();
+                    p.y += p.speed;
+                    if (p.y > height) {{ p.y = -p.length; p.x = Math.random() * width; }}
+                }});
                 requestAnimationFrame(draw);
             }}
             draw();
 
-            // Надежный запуск через один клик по DOM-элементу
-            function toggleAudio() {{
-                const audio = document.getElementById('bgAudio');
+            // Автономный WebAudio синтезатор (работает везде 100%)
+            let audioCtx = null, noiseNode = null, gainNode = null, isPlaying = false;
+
+            function toggleAtmosphere() {{
                 const btnText = document.getElementById('audioText');
                 const btnIcon = document.getElementById('audioIcon');
 
-                if (audio.paused) {{
-                    audio.play().then(() => {{
-                        btnText.innerText = 'Вимкнути атмосферу';
-                        btnIcon.innerText = '🔇';
-                    }}).catch(err => {{
-                        console.error("Audio playback error:", err);
-                    }});
+                if (!isPlaying) {{
+                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                    const bufferSize = audioCtx.sampleRate * 2;
+                    const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+                    const output = noiseBuffer.getChannelData(0);
+
+                    let lastOut = 0.0;
+                    for (let i = 0; i < bufferSize; i++) {{
+                        let white = Math.random() * 2 - 1;
+                        output[i] = (lastOut + (0.02 * white)) / 1.02;
+                        lastOut = output[i];
+                        output[i] *= 3.5;
+                    }}
+
+                    noiseNode = audioCtx.createBufferSource();
+                    noiseNode.buffer = noiseBuffer;
+                    noiseNode.loop = true;
+
+                    const filter = audioCtx.createBiquadFilter();
+                    filter.type = 'lowpass';
+                    filter.frequency.value = PHENOMENON === 'thunderstorm' ? 800 : 400;
+
+                    gainNode = audioCtx.createGain();
+                    gainNode.gain.setValueAtTime(0.12, audioCtx.currentTime);
+
+                    noiseNode.connect(filter);
+                    filter.connect(gainNode);
+                    gainNode.connect(audioCtx.destination);
+
+                    noiseNode.start();
+                    isPlaying = true;
+                    btnText.innerText = 'Вимкнути атмосферу';
+                    btnIcon.innerText = '🔇';
                 }} else {{
-                    audio.pause();
+                    if (gainNode) {{
+                        gainNode.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + 0.3);
+                        setTimeout(() => {{ if(noiseNode) noiseNode.stop(); if(audioCtx) audioCtx.close(); }}, 300);
+                    }}
+                    isPlaying = false;
                     btnText.innerText = 'Увімкнути атмосферу';
                     btnIcon.innerText = '🔊';
                 }}
