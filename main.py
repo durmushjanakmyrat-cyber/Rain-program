@@ -2,17 +2,19 @@ import asyncio
 import sqlite3
 import uuid
 import requests
-from fastapi import FastAPI, Form
+from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse
 
 app = FastAPI()
 
 # ---------------------------------------------------------
-# НАСТРОЙКИ (Вставьте свои реальные ключи)
+# НАСТРОЙКИ (Укажите свои реальные данные)
 # ---------------------------------------------------------
 WEATHER_API_KEY = "2de4b7fbe5dd6de7e15810555d61457f"
 TELEGRAM_BOT_TOKEN = "8539880858:AAH-LroXnwOpZq4v8p-qmnhDOkd3thDaWIA"
+BOT_USERNAME = "WheaterRainAppBot"
 ADMIN_PIN = "122595"
+RENDER_URL = "https://rain-program.onrender.com"
 
 PHENOMENA = {
     "rain": {"name_ua": "🌧️ Дощ", "name_en": "🌧️ Rain", "min_id": 200, "max_id": 531},
@@ -49,8 +51,62 @@ def init_db():
 init_db()
 
 
+# ---------------------------------------------------------
+# TELEGRAM WEBHOOK (Прием сообщений /start)
+# ---------------------------------------------------------
+@app.post("/webhook")
+async def telegram_webhook(request: Request):
+    try:
+        data = await request.json()
+        if "message" in data:
+            chat_id = str(data["message"]["chat"]["id"])
+            text = data["message"].get("text", "")
+
+            if text.startswith("/start"):
+                parts = text.split()
+                if len(parts) > 1:
+                    order_id = parts[1].strip()
+
+                    conn = sqlite3.connect("orders.db")
+                    cursor = conn.cursor()
+                    cursor.execute("UPDATE orders SET recipient_chat_id = ? WHERE id = ?", (chat_id, order_id))
+                    cursor.execute("SELECT sender, city, phenomenon, lang FROM orders WHERE id = ?", (order_id,))
+                    order = cursor.fetchone()
+                    conn.commit()
+                    conn.close()
+
+                    if order:
+                        sender, city, phenomenon_key, lang = order
+                        rules = PHENOMENA.get(phenomenon_key, {})
+                        phen_name = rules.get("name_en" if lang == "en" else "name_ua", phenomenon_key)
+
+                        reply_text = (
+                            f"✨ **Gift Activated!**\n\n"
+                            f"{sender} booked **{phen_name}** in **{city.capitalize()}** for you.\n"
+                            f"We will notify you instantly when it starts!"
+                            if lang == "en"
+                            else f"✨ **Подарунок активовано!**\n\n"
+                            f"{sender} забронював(ла) для вас **{phen_name}** у м. **{city.capitalize()}**.\n"
+                            f"Ми сповістимо вас миттєво, як тільки явище розпочнеться!"
+                        )
+
+                        requests.post(
+                            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+                            json={"chat_id": chat_id, "text": reply_text, "parse_mode": "Markdown"},
+                        )
+                else:
+                    requests.post(
+                        f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+                        json={"chat_id": chat_id, "text": "Вітаємо! Сервіс емоцій та погодних подарунків вітає вас."},
+                    )
+    except Exception as e:
+        print(f"Webhook error: {e}")
+
+    return {"status": "ok"}
+
+
 def send_notification(order_id, sender, recipient_chat_id, message, city, phenomenon_name, temp, lang="ua"):
-    cert_url = f"https://rain-program.onrender.com/cert/{order_id}"
+    cert_url = f"{RENDER_URL}/cert/{order_id}"
 
     if lang == "en":
         text = (
@@ -124,11 +180,18 @@ async def background_weather_checker():
 
 @app.on_event("startup")
 async def startup_event():
+    # Регистрация вебхука в Telegram при запуске
+    try:
+        webhook_url = f"{RENDER_URL}/webhook"
+        requests.get(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setWebhook?url={webhook_url}")
+    except Exception as e:
+        print(f"Failed to set webhook: {e}")
+
     asyncio.create_task(background_weather_checker())
 
 
 # ---------------------------------------------------------
-# ГЛАВНАЯ СТРАНИЦА С ПЕРЕКЛЮЧАТЕЛЕМ ЯЗЫКОВ
+# ГЛАВНАЯ СТРАНИЦА
 # ---------------------------------------------------------
 @app.get("/", response_class=HTMLResponse)
 def home_page():
@@ -290,7 +353,7 @@ def create_order(
     conn.commit()
     conn.close()
 
-    tg_gift_link = f"https://t.me/WheaterRainAppBot?start={order_id}"
+    tg_gift_link = f"https://t.me/{BOT_USERNAME}?start={order_id}"
 
     if lang == "en":
         return HTMLResponse(
@@ -399,7 +462,7 @@ def test_trigger(pin: str = Form(...), order_id: str = Form(...)):
     if order:
         sender, recipient_chat_id, message, city, phenomenon_key, lang = order
         if not recipient_chat_id:
-            return HTMLResponse("<h3>⚠️ Одержувач ще не перейшов за посиланням-подарунком!</h3><a href='/admin?pin=1234'>Назад</a>")
+            return HTMLResponse("<h3>⚠️ Одержувач ще не перейшов за посиланням-подарунком!</h3><a href='/admin?pin=122595'>Назад</a>")
 
         rules = PHENOMENA.get(phenomenon_key, {"name_ua": "🌩️ Тест", "name_en": "🌩️ Test"})
         phen_name = rules["name_en"] if lang == "en" else rules["name_ua"]
