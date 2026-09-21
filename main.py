@@ -756,46 +756,34 @@ def view_certificate(order_id: str):
             }}
             draw();
 
-            // Web Audio API: Мягкий коричневый шум (Brownian Noise) для тихих капель
-            let audioCtx, noiseNode, gainNode, isPlaying = false;
+            // Всплывающие реалистичные аудиотреки от Google CDN
+            const SOUNDS = {{
+                'rain': 'https://actions.google.com/sounds/v1/weather/rain_drizzle.ogg',
+                'first_snow': 'https://actions.google.com/sounds/v1/weather/wind_heavy.ogg',
+                'thunderstorm': 'https://actions.google.com/sounds/v1/weather/thunderstorm.ogg',
+                'fog': 'https://actions.google.com/sounds/v1/ambiences/outdoor_park.ogg',
+                'clear': 'https://actions.google.com/sounds/v1/ambiences/night_crickets.ogg'
+            }};
+
+            let audio = null;
+            let isPlaying = false;
 
             function toggleAudio() {{
                 if (!isPlaying) {{
-                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                    const bufferSize = audioCtx.sampleRate * 2;
-                    const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
-                    const output = noiseBuffer.getChannelData(0);
+                    const soundUrl = SOUNDS[PHENOMENON] || SOUNDS['rain'];
+                    audio = new Audio(soundUrl);
+                    audio.loop = true;
+                    audio.volume = 0.5;
+                    audio.play();
 
-                    let lastOut = 0.0;
-                    for (let i = 0; i < bufferSize; i++) {{
-                        let white = Math.random() * 2 - 1;
-                        output[i] = (lastOut + (0.02 * white)) / 1.02;
-                        lastOut = output[i];
-                        output[i] *= 2.5;
-                    }}
-
-                    noiseNode = audioCtx.createBufferSource();
-                    noiseNode.buffer = noiseBuffer;
-                    noiseNode.loop = true;
-
-                    const filter = audioCtx.createBiquadFilter();
-                    filter.type = 'lowpass';
-                    filter.frequency.value = 450;
-
-                    gainNode = audioCtx.createGain();
-                    gainNode.gain.setValueAtTime(0.04, audioCtx.currentTime);
-
-                    noiseNode.connect(filter);
-                    filter.connect(gainNode);
-                    gainNode.connect(audioCtx.destination);
-
-                    noiseNode.start();
                     isPlaying = true;
                     document.getElementById('audioText').innerText = 'Вимкнути атмосферу';
                     document.getElementById('audioIcon').innerText = '🔇';
                 }} else {{
-                    gainNode.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + 0.5);
-                    setTimeout(() => {{ noiseNode.stop(); audioCtx.close(); }}, 500);
+                    if (audio) {{
+                        audio.pause();
+                        audio = null;
+                    }}
                     isPlaying = false;
                     document.getElementById('audioText').innerText = 'Увімкнути атмосферу';
                     document.getElementById('audioIcon').innerText = '🔊';
