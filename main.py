@@ -756,13 +756,13 @@ def view_certificate(order_id: str):
             }}
             draw();
 
-            // Всплывающие реалистичные аудиотреки от Google CDN
+            // Проверенные универсальные MP3-аудиодорожки
             const SOUNDS = {{
-                'rain': 'https://actions.google.com/sounds/v1/weather/rain_drizzle.ogg',
-                'first_snow': 'https://actions.google.com/sounds/v1/weather/wind_heavy.ogg',
-                'thunderstorm': 'https://actions.google.com/sounds/v1/weather/thunderstorm.ogg',
-                'fog': 'https://actions.google.com/sounds/v1/ambiences/outdoor_park.ogg',
-                'clear': 'https://actions.google.com/sounds/v1/ambiences/night_crickets.ogg'
+                'rain': 'https://cdn.pixabay.com/download/audio/2022/05/16/audio_db6591201e.mp3',
+                'first_snow': 'https://cdn.pixabay.com/download/audio/2022/01/18/audio_d0a13f69d2.mp3',
+                'thunderstorm': 'https://cdn.pixabay.com/download/audio/2021/08/09/audio_8245582c61.mp3',
+                'fog': 'https://cdn.pixabay.com/download/audio/2022/03/24/audio_34b3f3b900.mp3',
+                'clear': 'https://cdn.pixabay.com/download/audio/2021/09/06/audio_03d98fb870.mp3'
             }};
 
             let audio = null;
@@ -774,11 +774,14 @@ def view_certificate(order_id: str):
                     audio = new Audio(soundUrl);
                     audio.loop = true;
                     audio.volume = 0.5;
-                    audio.play();
 
-                    isPlaying = true;
-                    document.getElementById('audioText').innerText = 'Вимкнути атмосферу';
-                    document.getElementById('audioIcon').innerText = '🔇';
+                    audio.play().then(() => {{
+                        isPlaying = true;
+                        document.getElementById('audioText').innerText = 'Вимкнути атмосферу';
+                        document.getElementById('audioIcon').innerText = '🔇';
+                    }}).catch(e => {{
+                        console.log("Audio play error:", e);
+                    }});
                 }} else {{
                     if (audio) {{
                         audio.pause();
