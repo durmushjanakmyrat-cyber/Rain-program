@@ -10,9 +10,9 @@ app = FastAPI()
 # ---------------------------------------------------------
 # 🔑 НАСТРОЙКИ
 # ---------------------------------------------------------
-WEATHER_API_KEY = "2de4b7fbe5dd6de7e15810555d61457f"
-TELEGRAM_BOT_TOKEN = "8539880858:AAH-LroXnwOpZq4v8p-qmnhDOkd3thDaWIA"
-ADMIN_PIN = "122595"
+WEATHER_API_KEY = "ВАШ_OPENWEATHER_API_KEY"
+TELEGRAM_BOT_TOKEN = "ВАШ_TELEGRAM_BOT_TOKEN"
+ADMIN_PIN = "1234"
 
 PHENOMENA = {
     "rain": {"name_ua": "🌧️ Дощ", "desc": "Для затишку та теплих спогадів", "min_id": 200, "max_id": 531},
@@ -42,7 +42,7 @@ def init_db():
 init_db()
 
 # ---------------------------------------------------------
-# ГЛАВНАЯ СТРАНИЦА (СВЕТЛЫЙ ПАСТЕЛЬНЫЙ МИНИМАЛИЗМ)
+# ГЛАВНАЯ СТРАНИЦА С ИНТЕРАКТИВНЫМ АНИМИРОВАННЫМ ПРЕВЬЮ
 # ---------------------------------------------------------
 @app.get("/", response_class=HTMLResponse)
 def home_page():
@@ -151,7 +151,6 @@ def home_page():
                 display: block;
             }}
 
-            /* Плитки явлений */
             .phenomenon-grid {{
                 display: grid;
                 grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
@@ -183,7 +182,6 @@ def home_page():
             .phenom-icon {{ font-size: 24px; display: block; margin-bottom: 4px; }}
             .phenom-name {{ font-size: 13px; font-weight: 600; color: #1e293b; }}
 
-            /* Поля ввода */
             .input-group {{
                 margin-bottom: 20px;
             }}
@@ -243,67 +241,107 @@ def home_page():
                 transform: translateY(-1px);
             }}
 
-            /* Live Preview Card */
+            /* ИНТЕРАКТИВНОЕ ПРЕВЬЮ С АНИМАЦИЕЙ И ЗВУКОМ */
             .preview-container {{
                 position: sticky;
                 top: 40px;
             }}
 
             .preview-card {{
-                background: #ffffff;
+                position: relative;
+                overflow: hidden;
+                background: #0f172a;
                 border-radius: 28px;
                 padding: 32px 26px;
-                border: 1px solid var(--border);
-                box-shadow: 0 20px 40px -10px rgba(120, 113, 108, 0.08);
+                border: 1px solid rgba(255, 255, 255, 0.15);
+                box-shadow: 0 20px 40px -10px rgba(15, 23, 42, 0.3);
                 text-align: center;
+                color: #ffffff;
+                transition: background 0.5s ease;
+            }}
+
+            .preview-canvas {{
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                z-index: 1;
+                pointer-events: none;
+            }}
+
+            .preview-content {{
+                position: relative;
+                z-index: 2;
             }}
 
             .preview-badge {{
                 font-size: 11px;
                 text-transform: uppercase;
                 letter-spacing: 1.5px;
-                color: #0284c7;
+                color: #38bdf8;
                 font-weight: 700;
                 margin-bottom: 20px;
                 display: inline-block;
-                background: #e0f2fe;
+                background: rgba(56, 189, 248, 0.15);
+                border: 1px solid rgba(56, 189, 248, 0.3);
                 padding: 4px 14px;
                 border-radius: 100px;
             }}
 
             .preview-title {{
                 font-family: 'Cormorant Garamond', serif;
-                font-size: 30px;
+                font-size: 32px;
                 font-weight: 600;
                 margin-bottom: 6px;
-                color: #1c1917;
+                color: #ffffff;
             }}
 
             .preview-location {{
                 font-size: 13px;
-                color: #78716c;
+                color: #94a3b8;
                 margin-bottom: 24px;
             }}
 
             .preview-quote {{
-                background: #fdfbf7;
-                border-left: 3px solid #0284c7;
+                background: rgba(255, 255, 255, 0.05);
+                backdrop-filter: blur(8px);
+                border-left: 3px solid #38bdf8;
                 padding: 18px 20px;
                 border-radius: 0 16px 16px 0;
                 font-style: italic;
                 font-size: 14px;
                 line-height: 1.6;
-                color: #44403c;
+                color: #f1f5f9;
                 text-align: left;
-                margin-bottom: 10px;
+                margin-bottom: 20px;
             }}
 
             .preview-sender {{
                 text-align: right;
                 font-style: normal;
                 font-weight: 600;
-                color: #0284c7;
+                color: #38bdf8;
                 margin-top: 8px;
+            }}
+
+            .audio-btn {{
+                background: rgba(255, 255, 255, 0.1);
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                color: #ffffff;
+                padding: 8px 18px;
+                border-radius: 50px;
+                font-size: 12px;
+                cursor: pointer;
+                transition: all 0.3s;
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+            }}
+
+            .audio-btn:hover {{
+                background: rgba(56, 189, 248, 0.25);
+                border-color: #38bdf8;
             }}
 
             .owner-link {{
@@ -384,17 +422,25 @@ def home_page():
                 </form>
             </div>
 
-            <!-- ИНТЕРАКТИВНЫЙ LIVE PREVIEW -->
+            <!-- ИНТЕРАКТИВНОЕ LIVE PREVIEW С АНИМАЦИЕЙ И ЗВУКОМ -->
             <div class="preview-container">
                 <span class="section-label" style="text-align: center;">Так це побачить отримувач:</span>
-                <div class="preview-card">
-                    <div class="preview-badge">Персональний сертифікат</div>
-                    <div class="preview-title" id="prev_phenomenon">🌧️ Дощ</div>
-                    <div class="preview-location">Зареєстровано в місті <b id="prev_city" style="color: #1c1917;">Київ</b></div>
+                <div class="preview-card" id="prev_card">
+                    <canvas class="preview-canvas" id="previewCanvas"></canvas>
+                    
+                    <div class="preview-content">
+                        <div class="preview-badge">Персональний сертифікат</div>
+                        <div class="preview-title" id="prev_phenomenon">🌧️ Дощ</div>
+                        <div class="preview-location">Зареєстровано в місті <b id="prev_city" style="color: #ffffff;">Київ</b></div>
 
-                    <div class="preview-quote">
-                        «<span id="prev_message">Нехай цей дощ нагадає, як сильно я про тебе дбаю...</span>»
-                        <div class="preview-sender">— <span id="prev_sender">Олександр</span></div>
+                        <div class="preview-quote">
+                            «<span id="prev_message">Нехай цей дощ нагадає, як сильно я про тебе дбаю...</span>»
+                            <div class="preview-sender">— <span id="prev_sender">Олександр</span></div>
+                        </div>
+
+                        <button type="button" class="audio-btn" onclick="toggleAtmosphere()">
+                            <span id="audioIcon">🔊</span> <span id="audioText">Послухати атмосферу</span>
+                        </button>
                     </div>
                 </div>
 
@@ -403,19 +449,135 @@ def home_page():
         </div>
 
         <script>
-            let currentPhenomenonName = "🌧️ Дощ";
+            let currentPhenomenonKey = "rain";
+            const canvas = document.getElementById('previewCanvas');
+            const ctx = canvas.getContext('2d');
+            let width = canvas.width = canvas.offsetWidth;
+            let height = canvas.height = canvas.offsetHeight;
+
+            window.addEventListener('resize', () => {{
+                width = canvas.width = canvas.offsetWidth;
+                height = canvas.height = canvas.offsetHeight;
+            }});
+
+            let particles = [];
+            let flashOpacity = 0;
+
+            const BACKGROUNDS = {{
+                'rain': '#0b1329',
+                'first_snow': '#1e293b',
+                'thunderstorm': '#2e1065',
+                'fog': '#1c1917',
+                'clear': '#022c22'
+            }};
+
+            function initParticles(key) {{
+                particles = [];
+                const pCount = key === 'thunderstorm' ? 100 : (key === 'fog' ? 20 : 60);
+
+                for (let i = 0; i < pCount; i++) {{
+                    particles.push({{
+                        x: Math.random() * width,
+                        y: Math.random() * height,
+                        r: Math.random() * 2 + 1,
+                        length: Math.random() * 15 + 8,
+                        speed: Math.random() * 6 + 4,
+                        speedX: Math.random() * 0.6 - 0.3,
+                        opacity: Math.random() * 0.6 + 0.2
+                    }});
+                }}
+            }}
+            initParticles('rain');
+
+            function draw() {{
+                ctx.clearRect(0, 0, width, height);
+
+                if (currentPhenomenonKey === 'first_snow') {{
+                    ctx.fillStyle = '#ffffff';
+                    particles.forEach(p => {{
+                        ctx.beginPath();
+                        ctx.globalAlpha = p.opacity;
+                        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+                        ctx.fill();
+                        p.y += p.speed * 0.2;
+                        p.x += p.speedX;
+                        if (p.y > height) {{ p.y = -5; p.x = Math.random() * width; }}
+                    }});
+                }} else if (currentPhenomenonKey === 'thunderstorm') {{
+                    ctx.strokeStyle = '#c084fc';
+                    ctx.lineWidth = 1.2;
+                    particles.forEach(p => {{
+                        ctx.beginPath();
+                        ctx.globalAlpha = p.opacity;
+                        ctx.moveTo(p.x, p.y);
+                        ctx.lineTo(p.x - 2, p.y + p.length);
+                        ctx.stroke();
+                        p.y += p.speed * 1.5;
+                        if (p.y > height) {{ p.y = -p.length; p.x = Math.random() * width; }}
+                    }});
+
+                    if (Math.random() < 0.01) flashOpacity = 0.4;
+                    if (flashOpacity > 0) {{
+                        ctx.fillStyle = `rgba(255, 255, 255, ${{flashOpacity}})`;
+                        ctx.fillRect(0, 0, width, height);
+                        flashOpacity -= 0.03;
+                    }}
+                }} else if (currentPhenomenonKey === 'fog') {{
+                    particles.forEach(p => {{
+                        ctx.beginPath();
+                        ctx.globalAlpha = p.opacity * 0.15;
+                        let grad = ctx.createRadialGradient(p.x, p.y, 5, p.x, p.y, p.r * 25);
+                        grad.addColorStop(0, '#e2e8f0');
+                        grad.addColorStop(1, 'transparent');
+                        ctx.fillStyle = grad;
+                        ctx.arc(p.x, p.y, p.r * 25, 0, Math.PI * 2);
+                        ctx.fill();
+                        p.x += p.speedX * 0.3;
+                        if (p.x > width + 50) p.x = -50;
+                    }});
+                }} else if (currentPhenomenonKey === 'clear') {{
+                    ctx.fillStyle = '#fef08a';
+                    particles.forEach(p => {{
+                        ctx.beginPath();
+                        p.opacity += (Math.random() * 0.02 - 0.01);
+                        if (p.opacity > 0.9) p.opacity = 0.9;
+                        if (p.opacity < 0.1) p.opacity = 0.1;
+                        ctx.globalAlpha = p.opacity;
+                        ctx.arc(p.x, p.y, p.r * 0.8, 0, Math.PI * 2);
+                        ctx.fill();
+                    }});
+                }} else {{ // Rain (default)
+                    ctx.strokeStyle = '#38bdf8';
+                    ctx.lineWidth = 1;
+                    particles.forEach(p => {{
+                        ctx.beginPath();
+                        ctx.globalAlpha = p.opacity;
+                        ctx.moveTo(p.x, p.y);
+                        ctx.lineTo(p.x, p.y + p.length);
+                        ctx.stroke();
+                        p.y += p.speed;
+                        if (p.y > height) {{ p.y = -p.length; p.x = Math.random() * width; }}
+                    }});
+                }}
+                requestAnimationFrame(draw);
+            }}
+            draw();
 
             function selectPhenomenon(key, name) {{
                 document.getElementById('selected_phenomenon').value = key;
-                currentPhenomenonName = name;
+                currentPhenomenonKey = key;
                 document.getElementById('prev_phenomenon').innerText = name;
+                document.getElementById('prev_card').style.background = BACKGROUNDS[key] || '#0b1329';
 
                 document.querySelectorAll('.phenom-item').forEach(el => el.classList.remove('active'));
                 event.currentTarget.classList.add('active');
+
+                initParticles(key);
+                if (isPlaying) restartAudio();
             }}
 
             function updatePreview() {{
-                const sender = document.getElementById('in_sender').value.trim();
+                const sender = document.getElementById('in_sender').value.strip ? document.getElementById('in_sender').value.strip() : document.getElementById('in_sender').value.trim();
                 const city = document.getElementById('in_city').value.trim();
                 const message = document.getElementById('in_message').value.trim();
 
@@ -423,13 +585,74 @@ def home_page():
                 document.getElementById('prev_city').innerText = city ? city : "Київ";
                 document.getElementById('prev_message').innerText = message ? message : "Нехай цей дощ нагадає, як сильно я про тебе дбаю...";
             }}
+
+            // ЗВУКОВА АТМОСФЕРА (Web Audio API)
+            let audioCtx = null, noiseNode = null, gainNode = null, isPlaying = false;
+
+            function toggleAtmosphere() {{
+                if (!isPlaying) {{
+                    startAudio();
+                }} else {{
+                    stopAudio();
+                }}
+            }}
+
+            function startAudio() {{
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const bufferSize = audioCtx.sampleRate * 2;
+                const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+                const output = noiseBuffer.getChannelData(0);
+
+                let lastOut = 0.0;
+                for (let i = 0; i < bufferSize; i++) {{
+                    let white = Math.random() * 2 - 1;
+                    output[i] = (lastOut + (0.02 * white)) / 1.02;
+                    lastOut = output[i];
+                    output[i] *= 3.5;
+                }}
+
+                noiseNode = audioCtx.createBufferSource();
+                noiseNode.buffer = noiseBuffer;
+                noiseNode.loop = true;
+
+                const filter = audioCtx.createBiquadFilter();
+                filter.type = 'lowpass';
+                filter.frequency.value = currentPhenomenonKey === 'thunderstorm' ? 800 : (currentPhenomenonKey === 'first_snow' ? 250 : 450);
+
+                gainNode = audioCtx.createGain();
+                gainNode.gain.setValueAtTime(0.12, audioCtx.currentTime);
+
+                noiseNode.connect(filter);
+                filter.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+
+                noiseNode.start();
+                isPlaying = true;
+                document.getElementById('audioText').innerText = 'Вимкнути атмосферу';
+                document.getElementById('audioIcon').innerText = '🔇';
+            }}
+
+            function stopAudio() {{
+                if (gainNode && audioCtx) {{
+                    gainNode.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + 0.2);
+                    setTimeout(() => {{ if(noiseNode) noiseNode.stop(); if(audioCtx) audioCtx.close(); }}, 200);
+                }}
+                isPlaying = false;
+                document.getElementById('audioText').innerText = 'Послухати атмосферу';
+                document.getElementById('audioIcon').innerText = '🔊';
+            }}
+
+            function restartAudio() {{
+                stopAudio();
+                setTimeout(() => startAudio(), 250);
+            }}
         </script>
     </body>
     </html>
     """
 
 # ---------------------------------------------------------
-# ОСТАЛЬНЫЕ ФУНКЦИИ (БЭКЕНД И СЕРТИФИКАТЫ)
+# БЭКЕНД И МАРШРУТЫ
 # ---------------------------------------------------------
 @app.post("/create-order")
 def create_order(
